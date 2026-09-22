@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import inspect
+import os
+import subprocess
 import stat
 import sys
 from dataclasses import replace
@@ -8,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from japanmfa.checks import PreflightReport, run_preflight
+from japanmfa.checks import PreflightReport, _check, run_preflight
 from japanmfa.config import CommandConfig, PathConfig, PipelineConfig
 
 
@@ -37,7 +40,9 @@ elif len(args) >= 2 and args[1] == "--help":
     print("Usage: fake")
 elif args and args[0] == "tdmelodic":
     data = sys.stdin.read().strip()
-    if __import__("os").environ.get("FAKE_TD_MODE", "valid") == "malformed":
+    if "FAKE_TD_OUTPUT" in __import__("os").environ:
+        print(__import__("os").environ["FAKE_TD_OUTPUT"])
+    elif __import__("os").environ.get("FAKE_TD_MODE", "valid") == "malformed":
         print("not-the-requested-reading")
     else:
         print(data.rsplit(",", 1)[-1])
@@ -89,13 +94,73 @@ def test_missing_mfa_executable_is_actionable(tmp_path: Path) -> None:
 
 def test_wrong_mfa_major_version_fails_without_leaking_output(tmp_path: Path, monkeypatch) -> None:
     fake = _fake(tmp_path)
-    monkeypatch.setenv("FAKE_MFA_VERSION", "2.0.1 secret-token")
+    monkeypatch.setenv("FAKE_MFA_VERSION", "MFA version: 2.0.1")
+    monkeypatch.setenv("JAPANMFA_SECRET_TOKEN", "secret-token")
     report = run_preflight(_config(tmp_path, fake))
 
     check = _names(report)["mfa_version"]
     assert not report.ok
     assert check.reason_code == "mfa_version_incompatible"
     assert "secret-token" not in report.to_json()
+
+
+@pytest.mark.parametrize(
+    "version_output",
+    [
+        "dependency 3.12.0\nMontreal Forced Aligner 2.0.1",
+        "MFA version: 2.9.0",
+    ],
+)
+def test_mfa_version_parser_does_not_accept_dependency_major_three(
+    tmp_path: Path, monkeypatch, version_output: str
+) -> None:
+    fake = _fake(tmp_path)
+    monkeypatch.setenv("FAKE_MFA_VERSION", version_output)
+
+    report = run_preflight(_config(tmp_path, fake))
+
+    assert _names(report)["mfa_version"].reason_code == "mfa_version_incompatible"
+
+
+@pytest.mark.parametrize("version_output", ["3.3.9", "Montreal Forced Aligner version: 3.3.9"])
+def test_mfa_version_parser_accepts_bare_or_product_version(
+    tmp_path: Path, monkeypatch, version_output: str
+) -> None:
+    fake = _fake(tmp_path)
+    monkeypatch.setenv("FAKE_MFA_VERSION", version_output)
+
+    report = run_preflight(_config(tmp_path, fake))
+
+    assert _names(report)["mfa_version"].ok
+
+
+def test_preflight_redacts_sensitive_values_and_embedded_environment_secrets(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fake = _fake(tmp_path)
+    monkeypatch.setenv("JAPANMFA_API_KEY", "embedded-api-secret")
+    monkeypatch.setenv("FAKE_MFA_VERSION", "secret-token my_api_key_value")
+    monkeypatch.setenv("JAPANMFA_TDMELODIC_COMMAND", f"{sys.executable} {fake} tdmelodic")
+    report = run_preflight(_config(tmp_path, fake))
+    rendered = report.to_json()
+
+    assert "embedded-api-secret" not in rendered
+    assert "secret-token" not in rendered
+    assert "my_api_key_value" not in rendered
+    assert "g2p" in rendered
+    safe = _check(
+        "redaction",
+        False,
+        "command_failed",
+        "secret-token and embedded-api-secret",
+        "retry with my_api_key_value",
+        ["tool", "--token", "secret-token", "authorization_header"],
+    )
+    safe_rendered = json.dumps(safe.as_dict())
+    assert "secret-token" not in safe_rendered
+    assert "embedded-api-secret" not in safe_rendered
+    assert "my_api_key_value" not in safe_rendered
+    assert "authorization_header" not in safe_rendered
 
 
 def test_absent_japanese_models_are_reported_separately(tmp_path: Path, monkeypatch) -> None:
@@ -151,6 +216,80 @@ def test_malformed_tdmelodic_probe_is_typed(tmp_path: Path, monkeypatch) -> None
     check = _names(report)["tdmelodic_probe"]
     assert not report.ok
     assert check.reason_code == "probe_malformed"
+
+
+@pytest.mark.parametrize("output", ["[[ニホンゴ]]", "][ニホンゴ]["])
+def test_tdmelodic_probe_rejects_malformed_brackets(
+    tmp_path: Path, monkeypatch, output: str
+) -> None:
+    fake = _fake(tmp_path)
+    monkeypatch.setenv("FAKE_TD_OUTPUT", output)
+    monkeypatch.setenv("JAPANMFA_TDMELODIC_COMMAND", f"{sys.executable} {fake} tdmelodic")
+
+    report = run_preflight(_config(tmp_path, fake))
+
+    assert _names(report)["tdmelodic_probe"].reason_code == "probe_malformed"
+
+
+def test_run_preflight_signature_is_stable() -> None:
+    assert list(inspect.signature(run_preflight).parameters) == ["config"]
+
+
+def test_tdmelodic_wrapper_executes_docker_with_immutable_commit(tmp_path: Path) -> None:
+    fake_docker = tmp_path / "docker"
+    argv_file = tmp_path / "docker-argv"
+    fake_docker.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        "pathlib.Path(os.environ['FAKE_DOCKER_ARGV']).write_text('\\n'.join(sys.argv[1:]))\n",
+        encoding="utf-8",
+    )
+    fake_docker.chmod(0o755)
+    commit = "0123456789abcdef" * 2 + "01234567"
+    env = {
+        **os.environ,
+        "DOCKER_BIN": str(fake_docker),
+        "FAKE_DOCKER_ARGV": str(argv_file),
+        "TDMELODIC_COMMIT": commit,
+    }
+
+    subprocess.run(
+        [str(Path(__file__).parents[2] / "tools" / "build_tdmelodic_image.sh")],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert argv[0:2] == ["build", "--build-arg"]
+    assert f"TDMELODIC_COMMIT={commit}" in argv
+    assert "--file" in argv
+    assert any(item.endswith("tools/Dockerfile.tdmelodic") for item in argv)
+    assert argv[-1] == str(Path(__file__).parents[2])
+
+
+def test_tdmelodic_wrapper_rejects_empty_or_mutable_commit(tmp_path: Path) -> None:
+    wrapper = Path(__file__).parents[2] / "tools" / "build_tdmelodic_image.sh"
+    for commit in ("", "main", "release/latest", "deadbeef"):
+        result = subprocess.run(
+            [str(wrapper)],
+            check=False,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "TDMELODIC_COMMIT": commit},
+        )
+        assert result.returncode != 0
+
+
+def test_tdmelodic_dockerfile_checks_upstream_and_immutable_commit() -> None:
+    dockerfile = (Path(__file__).parents[2] / "tools" / "Dockerfile.tdmelodic").read_text(
+        encoding="utf-8"
+    )
+    assert "ARG TDMELODIC_REPOSITORY" in dockerfile
+    assert "ARG TDMELODIC_COMMIT" in dockerfile
+    assert "git clone" in dockerfile
+    assert "git checkout --detach" in dockerfile
 
 
 def test_valid_setup_has_individual_passes_and_json_contract(tmp_path: Path, monkeypatch) -> None:

@@ -37,6 +37,20 @@ standard Hugging Face cache under `HF_HOME`. The default is
 `Qwen/Qwen3-ASR-1.7B`; `Qwen/Qwen3-ASR-0.6B` may be configured as a fallback.
 No implicit model download happens during `check` or `run`.
 
+tdmelodic is built separately from the project-owned
+[`tools/Dockerfile.tdmelodic`](tools/Dockerfile.tdmelodic). The wrapper requires
+a 40-character immutable upstream commit and invokes Docker only after that
+check:
+
+```bash
+TDMELODIC_COMMIT=<40-character-tdmelodic-sha> \
+  tools/build_tdmelodic_image.sh
+```
+
+The resulting tag defaults to the first 12 characters of that SHA. The wrapper
+passes the project root as the Docker build context and does not alter Conda,
+the old JapMFA repository, or the read-only corpus.
+
 ## Check and run
 
 Run preflight checks before a real job:
@@ -94,3 +108,33 @@ work are documented in [reading overrides](docs/reading-overrides.md) and
 [limitations](docs/limitations.md). Real `0922jap` evidence belongs in the
 [Task 12 template](docs/test-report-0922jap.md); the template contains no fake
 results.
+
+## Status, reason codes, and recovery actions
+
+`check` prints one result per probe and exits 1 if any probe is not OK. `run`
+always isolates an utterance: `aligned` means all five tiers validated,
+`skipped` means the input is outside the Japanese v1 scope, and `failed` means
+a supported item hit a typed stage/consistency error. Actions below are
+operator guidance only; the pipeline never downloads, guesses a reading, or
+silently retries by changing the source.
+
+| status/check | reason codes | operator action |
+|---|---|---|
+| preflight pass | `ok`, `not_required` | Continue only when the report overall is OK. |
+| preflight runtime/command | `executable_missing`, `runtime_unavailable`, `command_failed`, `command_timeout`, `cuda_probe_failed`, `cuda_unavailable` | Activate the named isolated runtime, verify the configured argv and GPU policy, then rerun `japanmfa check`. |
+| preflight MFA version/model | `mfa_version_unparseable`, `mfa_version_incompatible`, `model_unavailable` | Use MFA 3.x and install/register the configured Japanese acoustic and G2P models. |
+| preflight tdmelodic/path | `probe_malformed`, `path_not_writable` | Verify strict `sy2a(surface,yomi)` output and choose writable project-owned paths. |
+| skipped input | `unsupported_japanese_text`, `non_japanese_language`, `unsupported_language` | Keep the skip, supply Japanese text/audio, or document it as out of scope; no output TextGrid is published. |
+| discovery/text | `symlink_audio`, `duplicate_utterance_id`, `invalid_utf8` | Fix the corpus entry or text encoding; do not modify the source through the pipeline. |
+| audio/cache | `destination_directory_failed`, `partial_cleanup_failed`, `ffmpeg_failed`, `output_stat_failed`, `empty_output`, `atomic_replace_failed`, `duration_unavailable`, `cache_artifact_missing` | Check source readability, FFmpeg, project-owned work/cache paths, and retry the affected item. |
+| ASR | `audio_path_not_absolute`, `duplicate_audio_path`, `worker_start_failed`, `worker_failed`, `malformed_response`, `invalid_response`, `result_coverage_mismatch`, `unavailable` | Verify the isolated Qwen worker protocol/model; existing `.txt` remains authoritative. |
+| frontend/overrides | `sudachi_unavailable`, `sudachi_dictionary_unavailable`, `tokenization_failed`, `malformed_morpheme`, `token_span_mismatch`, `invalid_override`, `duplicate_override`, `overlapping_overrides`, `override_surface_mismatch`, `invalid_override_kana`, `override_requires_complete_token` | Install/use the declared Sudachi runtime or correct the exact span/surface/kana override. |
+| accent/tdmelodic | `invalid_request`, `command_start_failed`, `command_failed`, `output_count_mismatch`, `empty_output`, `malformed_output`, `mora_count_mismatch`, `reading_mismatch`, `output_coverage_mismatch` | Verify one output per token, balanced legal brackets, and exact locked-reading round-trip. |
+| MFA G2P/lexicon | `invalid_reading`, `work_directory_failed`, `input_write_failed`, `output_read_failed`, `malformed_output`, `multiple_pronunciations`, `out_of_vocabulary`, `missing_pronunciation`, `invalid_utterance_id`, `count_mismatch`, `empty_pronunciation`, `artifact_write_failed` | Inspect the isolated MFA G2P command/model and regenerate only the affected project-owned artifacts. |
+| MFA execution/parser | `path_ownership_invalid`, `output_directory_failed`, `work_directory_failed`, `command_start_failed`, `command_timeout`, `command_failed`, `log_write_failed`, `missing_output`, `multiple_outputs`, `malformed_textgrid`, `textgrid_read_failed`, `missing_tier`, `ambiguous_tier`, `invalid_boundaries`, `zero_duration_phone`, `phone_word_overlap`, `phone_not_contained` | Keep corpus/work/output roots disjoint and owned; inspect preserved logs and rerun after fixing MFA output. |
+| phone-map/projection | `phone_map_read_failed`, `invalid_phone_map`, `unknown_field`, `model_family_mismatch`, `invalid_normalizations`, `invalid_rules`, `invalid_rule`, `unknown_rule_field`, `duplicate_rule`, `unknown_phone`, `mora_phone_mapping`, `ambiguous_mora_phone_mapping`, `mora_coverage_mismatch`, `mora_reading_mismatch`, `word_alias_mismatch`, `phone_sequence_mismatch`, `unmapped_phone`, `cross_token_mapping`, `unlabeled_phone` | Do not guess a mapping; use the pinned Japanese MFA v3 map and preserve the diagnostic for a deliberate map/override fix. |
+| unexpected failure | `unexpected_exception` | Inspect the per-item traceback path and report a reproducible case; sibling items continue. |
+
+The exact JSON reason code is the stable value to use in batch summaries and
+follow-up reports. A failed or skipped item never receives a partial final
+TextGrid.

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import inspect
 from pathlib import Path
 
 from typer.testing import CliRunner
 
 from japanmfa.cli import app
+from japanmfa.checks import PreflightCheck, PreflightReport, run_preflight
 from japanmfa.errors import StageFailure
 
 
@@ -169,3 +171,39 @@ def test_run_converts_domain_setup_failure_to_controlled_cli_error(tmp_path: Pat
     assert result.exit_code == 1
     assert "batch setup failure" in result.output.lower()
     assert "traceback" not in result.output.lower()
+
+
+def test_check_prints_preflight_report_and_returns_success(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = tmp_path / "config.yaml"
+    _config(config)
+    report = PreflightReport(
+        ok=True,
+        checks=(PreflightCheck("fake", True, "ok", "ready"),),
+    )
+    monkeypatch.setattr("japanmfa.checks.run_preflight", lambda _config: report)
+
+    result = runner.invoke(app, ["check", "--config", str(config)])
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == report.as_dict()
+    assert list(inspect.signature(run_preflight).parameters) == ["config"]
+
+
+def test_check_prints_failed_preflight_and_returns_nonzero(
+    tmp_path: Path, monkeypatch
+) -> None:
+    config = tmp_path / "config.yaml"
+    _config(config)
+    report = PreflightReport(
+        ok=False,
+        checks=(PreflightCheck("fake", False, "model_unavailable", "missing", "download model"),),
+    )
+    monkeypatch.setattr("japanmfa.checks.run_preflight", lambda _config: report)
+
+    result = runner.invoke(app, ["check", "--config", str(config)])
+
+    assert result.exit_code == 1
+    assert json.loads(result.stdout)["ok"] is False
+    assert "model_unavailable" in result.stdout

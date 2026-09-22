@@ -1,0 +1,22 @@
+FROM python:3.11-slim
+
+ARG TDMELODIC_REPOSITORY
+ARG TDMELODIC_COMMIT
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN test -n "${TDMELODIC_REPOSITORY}" \
+    && test -n "${TDMELODIC_COMMIT}" \
+    && printf '%s\n' "${TDMELODIC_COMMIT}" | grep -Eq '^[0-9a-fA-F]{40}$' \
+    && git clone "${TDMELODIC_REPOSITORY}" /opt/tdmelodic \
+    && cd /opt/tdmelodic \
+    && git checkout --detach "${TDMELODIC_COMMIT}" \
+    && pip install --no-cache-dir .
+
+WORKDIR /opt/tdmelodic
+ENTRYPOINT ["tdmelodic"]

@@ -18,13 +18,21 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
+from .accent.parser import parse_accent
 from .config import PipelineConfig
+from .domain import Token
+from .frontend.mora import segment_morae
 
 
-_VERSION_RE = re.compile(r"\b(\d+)\.(\d+)(?:\.\d+)?\b")
+_BARE_VERSION_RE = re.compile(r"^\s*v?(\d+\.\d+(?:\.\d+)?)\s*$")
+_MFA_PRODUCT_VERSION_RE = re.compile(
+    r"^\s*(?:Montreal\s+Forced\s+Aligner|MFA)\b.*?v?(\d+\.\d+(?:\.\d+)?)\s*$",
+    re.IGNORECASE,
+)
 _DEFAULT_TIMEOUT = 8.0
 _PROBE_SURFACE = "日本語"
 _PROBE_YOMI = "ニホンゴ"
+_SENSITIVE_WORDS = ("token", "secret", "password", "api_key", "apikey", "authorization")
 
 
 @dataclass(frozen=True)
@@ -69,23 +77,39 @@ def _display_command(command: Sequence[str] | None) -> tuple[str, ...] | None:
         return None
     result: list[str] = []
     redact_next = False
-    secret_words = ("token", "secret", "password", "api_key", "apikey", "authorization")
     for arg in command:
-        text = str(arg)
+        text = _redact_text(str(arg))
         lowered = text.lower().lstrip("-")
         if redact_next:
             result.append("<redacted>")
             redact_next = False
             continue
-        if any(word in lowered for word in secret_words):
+        if any(word in lowered for word in _SENSITIVE_WORDS):
             if "=" in text:
                 result.append(text.split("=", 1)[0] + "=<redacted>")
-            else:
+            elif text.startswith("-"):
                 result.append(text)
                 redact_next = True
+            else:
+                result.append("<redacted>")
         else:
             result.append(text)
     return tuple(result)
+
+
+def _redact_text(value: str) -> str:
+    """Redact environment secrets and value-like secret tokens in text."""
+
+    for key, secret in os.environ.items():
+        normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
+        if secret and any(word.replace("_", "") in normalized for word in _SENSITIVE_WORDS):
+            value = value.replace(secret, "[REDACTED]")
+    lowered = value.casefold()
+    if any(word in lowered for word in _SENSITIVE_WORDS) and not value.lstrip().startswith("-"):
+        return "[REDACTED]"
+    if "=" in value and any(word in lowered for word in _SENSITIVE_WORDS):
+        return value.split("=", 1)[0] + "=<redacted>"
+    return value
 
 
 def _check(
@@ -100,8 +124,8 @@ def _check(
         name=name,
         ok=ok,
         reason_code=reason_code,
-        message=message,
-        action=action,
+        message=_redact_text(message),
+        action=_redact_text(action),
         command=_display_command(command),
     )
 
@@ -150,12 +174,22 @@ def _mfa_version(config: PipelineConfig, timeout: float) -> PreflightCheck:
         return _check(
             "mfa_version", False, "command_failed", "MFA version probe failed", "Run `mfa version` in the configured MFA environment.", command
         )
-    match = _VERSION_RE.search(stdout)
+    product_version: re.Match[str] | None = None
+    bare_versions: list[re.Match[str]] = []
+    for line in stdout.splitlines():
+        product_match = _MFA_PRODUCT_VERSION_RE.fullmatch(line)
+        if product_match is not None:
+            product_version = product_match
+            continue
+        bare_match = _BARE_VERSION_RE.fullmatch(line)
+        if bare_match is not None:
+            bare_versions.append(bare_match)
+    match = product_version or (bare_versions[0] if len(bare_versions) == 1 else None)
     if match is None:
         return _check(
             "mfa_version", False, "mfa_version_unparseable", "MFA did not report a semantic version", "Run `mfa version` and inspect the configured executable.", command
         )
-    if int(match.group(1)) != 3:
+    if int(match.group(1).split(".", 1)[0]) != 3:
         return _check(
             "mfa_version", False, "mfa_version_incompatible", "MFA major version must be 3", "Install Montreal Forced Aligner 3.x in the isolated MFA environment.", command
         )
@@ -268,8 +302,13 @@ def _tdmelodic_probe(timeout: float) -> PreflightCheck:
     if error == "timeout":
         return _check("tdmelodic_probe", False, "command_timeout", "tdmelodic probe timed out", "Retry after checking the isolated tdmelodic runtime.", command)
     lines = stdout.splitlines()
-    unmarked = lines[0].replace("[", "").replace("]", "") if len(lines) == 1 else ""
-    if returncode != 0 or len(lines) != 1 or not unmarked or _canonical_katakana(unmarked) != _PROBE_YOMI:
+    marked = lines[0].strip() if len(lines) == 1 else ""
+    try:
+        probe_token = Token(0, 0, len(_PROBE_YOMI), _PROBE_SURFACE, (), _PROBE_YOMI, "override")
+        parse_accent(marked, segment_morae(probe_token))
+    except Exception:
+        marked = ""
+    if returncode != 0 or len(lines) != 1 or not marked:
         return _check("tdmelodic_probe", False, "probe_malformed", "tdmelodic probe did not round-trip the supplied reading", "Verify `sy2a(surface, yomi)` output and the isolated tdmelodic command.", command)
     return _check("tdmelodic_probe", True, "ok", "tdmelodic probe round-tripped the supplied reading", command=command)
 
