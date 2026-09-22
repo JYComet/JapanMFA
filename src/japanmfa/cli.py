@@ -81,7 +81,12 @@ def run_file(
 ) -> None:
     """Align one WAV using a temporary one-item corpus manifest."""
     try:
-        original_parent = audio.parent.resolve()
+        if not audio.is_file() or audio.is_dir():
+            raise ValueError(f"audio must be a regular file: {audio}")
+        real_audio = audio.resolve()
+        if not real_audio.is_file() or real_audio.is_dir():
+            raise ValueError(f"audio target must be a regular file: {audio}")
+        original_parent = real_audio.parent
         resolved_output = output_root.resolve()
         if resolved_output == original_parent or original_parent in resolved_output.parents:
             raise ValueError("output root must not be identical to or nested inside the input corpus")

@@ -131,3 +131,48 @@ def test_adapter_identity_does_not_include_object_repr_or_address() -> None:
     from japanmfa.pipeline import _adapter_id
 
     assert _adapter_id(_StableAdapter()) == _adapter_id(_StableAdapter())
+
+
+def test_adapter_identity_canonicalizes_nested_sets_and_explicit_environment() -> None:
+    from japanmfa.pipeline import _adapter_id
+
+    first = _StableAdapter()
+    second = _StableAdapter()
+    first.options = {"nested": frozenset({"a", "b"}), "items": {"x", "y"}}
+    second.options = {"items": {"y", "x"}, "nested": frozenset({"b", "a"})}
+    assert _adapter_id(first) == _adapter_id(second)
+
+    second.options["items"] = {"x", "z"}
+    assert _adapter_id(first) != _adapter_id(second)
+    first.env = {"MODE": "cpu"}
+    second.env = {"MODE": "cuda"}
+    assert _adapter_id(first) != _adapter_id(second)
+
+
+@pytest.mark.parametrize("value", [{1: "one"}, {"nested": {2: "two"}}])
+def test_stage_fingerprint_rejects_non_string_mapping_keys(value: dict[object, object]) -> None:
+    with pytest.raises(TypeError, match="string mapping keys"):
+        stage_fingerprint("frontend", value)  # type: ignore[arg-type]
+
+
+def test_stage_cache_rejects_symlinked_cache_paths(tmp_path: Path) -> None:
+    cache_root = tmp_path / "cache"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    cache_root.mkdir()
+    (cache_root / "audio").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        StageCache(cache_root).load_or_run("audio", "f" * 64, lambda _path: {"ok": True})
+
+
+def test_stage_cache_validates_required_files_before_first_publication(tmp_path: Path) -> None:
+    cache = StageCache(tmp_path / "cache")
+    fingerprint = "g" * 64
+
+    def produce(path: Path) -> dict[str, bool]:
+        (path / "audio.wav").write_bytes(b"")
+        return {"ok": True}
+
+    with pytest.raises(ValueError, match="artifact validation"):
+        cache.load_or_run("audio", fingerprint, produce, required_files=("audio.wav",))
+    assert not (cache.directory("audio", fingerprint) / "complete.json").exists()

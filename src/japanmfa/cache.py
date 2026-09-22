@@ -35,11 +35,15 @@ def _canonical(value: Any) -> Any:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return _canonical(dataclasses.asdict(value))
     if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            raise TypeError("string mapping keys are required for fingerprints")
         return {str(key): _canonical(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
     if isinstance(value, (list, tuple)):
         return [_canonical(item) for item in value]
     if isinstance(value, (set, frozenset)):
-        return sorted((_canonical(item) for item in value), key=lambda item: json.dumps(item, sort_keys=True, ensure_ascii=False))
+        entries = [_canonical(item) for item in value]
+        entries.sort(key=lambda item: json.dumps(item, sort_keys=True, ensure_ascii=False, separators=(",", ":")))
+        return {"__type__": "set" if isinstance(value, set) else "frozenset", "items": entries}
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
     return repr(value)
@@ -87,7 +91,14 @@ class StageCache:
             raise ValueError("stage must be a single path component")
         if not fingerprint or Path(fingerprint).name != fingerprint or fingerprint in {".", ".."}:
             raise ValueError("fingerprint must be a single path component")
-        return self.root / stage / fingerprint
+        current = self.root
+        for component in (stage, fingerprint):
+            if current.exists() and current.is_symlink():
+                raise ValueError(f"cache path component is a symlink: {current}")
+            current = current / component
+        if current.exists() and current.is_symlink():
+            raise ValueError(f"cache path component is a symlink: {current}")
+        return current
 
     def directory(self, stage: str, fingerprint: str) -> Path:
         """Return the deterministic published directory for a stage identity."""
@@ -117,16 +128,8 @@ class StageCache:
         """Return a complete cached value, or run and atomically publish *producer*."""
         final = self._stage_dir(stage, fingerprint)
         cached = self._load_complete(final, fingerprint) if final.is_dir() else _MISSING
-        if cached is not _MISSING:
-            try:
-                if any(
-                    not name or Path(name).is_absolute() or ".." in Path(name).parts
-                    or not (final / name).is_file()
-                    for name in required_files
-                ) or (validate is not None and not validate(final)):
-                    cached = _MISSING
-            except (OSError, ValueError):
-                cached = _MISSING
+        if cached is not _MISSING and not self._artifacts_valid(final, required_files, validate):
+            cached = _MISSING
         if cached is not _MISSING:
             return cached  # type: ignore[return-value]
 
@@ -135,6 +138,8 @@ class StageCache:
         temporary = Path(tempfile.mkdtemp(prefix=f".{fingerprint}.", dir=parent))
         try:
             value = producer(temporary)
+            if not self._artifacts_valid(temporary, required_files, validate):
+                raise ValueError(f"artifact validation failed for stage {stage}")
             result = _jsonable(value)
             (temporary / "result.json").write_text(
                 json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n",
@@ -158,6 +163,25 @@ class StageCache:
                     shutil.rmtree(temporary)
                 except Exception:
                     pass
+
+    @staticmethod
+    def _artifacts_valid(
+        directory: Path,
+        required_files: Sequence[str],
+        validate: Callable[[Path], bool] | None,
+    ) -> bool:
+        try:
+            for name in required_files:
+                relative = Path(name)
+                if not name or relative.is_absolute() or ".." in relative.parts:
+                    return False
+                path = directory / relative
+                metadata = path.stat()
+                if path.is_symlink() or not path.is_file() or metadata.st_size <= 0:
+                    return False
+            return validate is None or bool(validate(directory))
+        except (OSError, ValueError):
+            return False
 
 
 __all__ = ["StageCache", "stage_fingerprint"]

@@ -131,6 +131,28 @@ def test_run_file_rejects_output_nested_in_original_audio_directory_before_copy(
     assert "input corpus" in result.output.lower()
 
 
+def test_run_file_uses_resolved_symlink_target_parent_for_path_safety(tmp_path: Path, monkeypatch) -> None:
+    real_source = tmp_path / "real-source"
+    link_source = tmp_path / "link-source"
+    real_source.mkdir()
+    link_source.mkdir()
+    target = real_source / "target.wav"
+    target.write_bytes(b"wav")
+    audio = link_source / "linked.wav"
+    audio.symlink_to(target)
+    config = tmp_path / "config.yaml"
+    _config(config)
+
+    def fail_copy(*_args, **_kwargs):
+        raise AssertionError("copy must not run before resolved-target validation")
+
+    monkeypatch.setattr("japanmfa.cli.shutil.copy2", fail_copy)
+    result = runner.invoke(app, ["run-file", str(audio), "--output", str(real_source / "out"), "--config", str(config)])
+
+    assert result.exit_code == 1
+    assert "input corpus" in result.output.lower()
+
+
 def test_run_converts_domain_setup_failure_to_controlled_cli_error(tmp_path: Path, monkeypatch) -> None:
     corpus = tmp_path / "corpus"
     corpus.mkdir()

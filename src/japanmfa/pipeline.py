@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import stat
+import json
 import time
 import traceback
 from dataclasses import dataclass
@@ -102,9 +103,15 @@ def _adapter_id(adapter: object) -> str:
         if isinstance(value, Path):
             return str(value)
         if isinstance(value, Mapping):
+            if any(not isinstance(key, str) for key in value):
+                raise TypeError("string mapping keys are required for adapter identity")
             return {str(key): stable(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
         if isinstance(value, (tuple, list)):
             return [stable(item) for item in value]
+        if isinstance(value, (set, frozenset)):
+            entries = [stable(item) for item in value]
+            entries.sort(key=lambda item: json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+            return {"__type__": "set" if isinstance(value, set) else "frozenset", "items": entries}
         if hasattr(value, "__dict__"):
             return stable(vars(value))
         return f"{type(value).__module__}.{type(value).__qualname__}"
@@ -115,8 +122,6 @@ def _adapter_id(adapter: object) -> str:
         if normalized in {"tokenizer", "env", "runtime_object"} or callable(value):
             continue
         state[normalized] = stable(value)
-    import json
-
     rendered = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return f"{type(adapter).__module__}.{type(adapter).__qualname__}:{rendered}"
 
