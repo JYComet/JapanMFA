@@ -68,6 +68,21 @@ def frontend() -> JapaneseFrontend:
             FakeMorpheme("晴れ", 3, "ハレ", ("名詞",)),
             FakeMorpheme("。", 5, "。", ("補助記号", "句点")),
         ],
+        "今日は・晴れ": [
+            FakeMorpheme("今日", 0, "キョウ", ("名詞",)),
+            FakeMorpheme("は", 2, "ハ", ("助詞",)),
+            FakeMorpheme("・", 3, "・", ("補助記号",)),
+            FakeMorpheme("晴れ", 4, "ハレ", ("名詞",)),
+        ],
+        "日本語★": [
+            FakeMorpheme("日本語", 0, "ニホンゴ", ("名詞",)),
+            FakeMorpheme("★", 3, "ホシ", ("記号",)),
+        ],
+        "日本語♪": [
+            FakeMorpheme("日本語", 0, "ニホンゴ", ("名詞",)),
+            FakeMorpheme("♪", 3, "オンプ", ("記号",)),
+        ],
+        "零": [FakeMorpheme("", 0, "", ("名詞",))],
         "2024年": [
             FakeMorpheme("2024", 0, "ニセンニジュウヨン", ("名詞", "数")),
             FakeMorpheme("年", 4, "ネン", ("名詞",)),
@@ -124,6 +139,46 @@ def test_punctuation_is_preserved_in_spans_but_not_a_pronounced_token(
     assert "".join(token.surface for token in tokens) == "今日は晴れ"
     assert all(token.surface != "。" for token in tokens)
     assert render_locked_kana("今日は晴れ。", tokens) == "キョウハハレ。"
+
+
+def test_middle_dot_punctuation_is_never_a_pronounced_token(frontend: JapaneseFrontend) -> None:
+    tokens = frontend.analyze(
+        SourceText(original="今日は・晴れ", processing="今日は・晴れ", source="txt")
+    )
+    assert "".join(token.surface for token in tokens) == "今日は晴れ"
+
+
+@pytest.mark.parametrize("symbol", ["★", "♪"])
+def test_unicode_symbols_are_skipped_even_with_a_katakana_reading(
+    frontend: JapaneseFrontend, symbol: str
+) -> None:
+    text = f"日本語{symbol}"
+    with pytest.raises(SkipUtterance, match="unsupported_japanese_text"):
+        frontend.analyze(SourceText(original=text, processing=text, source="txt"))
+
+
+def test_zero_length_morpheme_span_is_a_typed_failure(frontend: JapaneseFrontend) -> None:
+    with pytest.raises(StageFailure) as exc_info:
+        frontend.analyze(SourceText(original="零", processing="零", source="txt"))
+    assert exc_info.value.reason_code == "token_span_mismatch"
+
+
+def test_render_locked_kana_maps_processing_spans_to_original_and_preserves_linebreaks(
+    frontend: JapaneseFrontend,
+) -> None:
+    original = " \r\n今日は\r\n晴れ  \r\n"
+    processing = "今日は晴れ"
+    tokens = frontend.analyze(SourceText(original=original, processing=processing, source="txt"))
+    assert render_locked_kana(original, tokens) == " \r\nキョウハ\r\nハレ  \r\n"
+
+
+def test_render_locked_kana_rejects_original_that_cannot_reproduce_processing(
+    frontend: JapaneseFrontend,
+) -> None:
+    tokens = frontend.analyze(SourceText(original="今日は晴れ", processing="今日は晴れ", source="txt"))
+    with pytest.raises(StageFailure) as exc_info:
+        render_locked_kana("今日は曇り", tokens)
+    assert exc_info.value.reason_code == "token_span_mismatch"
 
 
 def test_numeric_token_with_katakana_reading_is_accepted(frontend: JapaneseFrontend) -> None:

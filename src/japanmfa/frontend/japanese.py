@@ -33,6 +33,30 @@ def _is_punctuation(surface: str) -> bool:
     )
 
 
+def _is_symbol(surface: str) -> bool:
+    """Return whether any character is a Unicode symbol."""
+    return any(unicodedata.category(character).startswith("S") for character in surface)
+
+
+def _processing_projection(original: str) -> tuple[str, tuple[int, ...]]:
+    """Return Task 2's processing text and each processing character's source index."""
+    source_indices: list[int] = []
+    characters: list[str] = []
+    for index, character in enumerate(original):
+        if character in "\r\n":
+            continue
+        source_indices.append(index)
+        characters.append(character)
+
+    joined = "".join(characters)
+    left_trimmed = len(joined) - len(joined.lstrip())
+    right_trimmed = len(joined.rstrip())
+    return (
+        joined[left_trimmed:right_trimmed],
+        tuple(source_indices[left_trimmed:right_trimmed]),
+    )
+
+
 def _span_failure(message: str, **details: object) -> StageFailure:
     return StageFailure(
         "frontend", "token_span_mismatch", f"token_span_mismatch: {message}", details
@@ -111,7 +135,7 @@ class JapaneseFrontend:
                     "Sudachi returned a malformed morpheme", error=str(exc)
                 ) from exc
 
-            if start != cursor or start < 0 or end < start or end > len(processing):
+            if start != cursor or start < 0 or end <= start or end > len(processing):
                 raise _span_failure(
                     "Sudachi morpheme spans cannot be reconciled to SourceText.processing",
                     expected_start=cursor,
@@ -139,7 +163,14 @@ class JapaneseFrontend:
                     {"surface": surface, "error": str(exc)},
                 ) from exc
 
-            if _is_punctuation(surface) and not _KATAKANA_RE.fullmatch(surface):
+            if _is_symbol(surface):
+                raise _skip(
+                    "text contains an unsupported Unicode symbol",
+                    surface=surface,
+                    start=start,
+                    end=end,
+                )
+            if _is_punctuation(surface):
                 continue
             if not isinstance(raw_reading, str) or not raw_reading:
                 raise _skip(
@@ -182,33 +213,67 @@ class JapaneseFrontend:
 
 def render_locked_kana(original: str, tokens: tuple[Token, ...]) -> str:
     """Replace pronounced token spans with locked readings and preserve gaps."""
+    mapped_tokens = _map_token_spans(original, tokens)
     pieces: list[str] = []
     cursor = 0
+    for token, (start, end) in mapped_tokens:
+        pieces.append(original[cursor:start])
+        pieces.append(token.reading)
+        cursor = end
+    pieces.append(original[cursor:])
+    return "".join(pieces)
+
+
+def _map_token_spans(
+    original: str, tokens: tuple[Token, ...]
+) -> tuple[tuple[Token, tuple[int, int]], ...]:
+    """Map processing-copy token spans to original-text character spans."""
+    processing, source_indices = _processing_projection(original)
+    mapped: list[tuple[Token, tuple[int, int]]] = []
+    previous_end = 0
     for token in tokens:
-        if token.start < cursor:
+        if token.start < previous_end:
             raise _span_failure(
                 "token spans overlap or decrease",
                 token_index=token.index,
                 start=token.start,
-                previous_end=cursor,
+                previous_end=previous_end,
             )
-        if token.start < 0 or token.end <= token.start or token.end > len(original):
+        if token.start < 0 or token.end <= token.start or token.end > len(processing):
             raise _span_failure(
-                "token span is outside the source text",
+                "token span is outside the processing text",
                 token_index=token.index,
                 start=token.start,
                 end=token.end,
-                source_length=len(original),
+                processing_length=len(processing),
             )
-        if original[token.start : token.end] != token.surface:
+        source_surface = processing[token.start : token.end]
+        if source_surface != token.surface:
             raise _span_failure(
-                "token surface does not match the stated source span",
+                "token surface does not match the processing text",
                 token_index=token.index,
                 surface=token.surface,
-                source_surface=original[token.start : token.end],
+                processing_surface=source_surface,
+                start=token.start,
+                end=token.end,
             )
-        pieces.append(original[cursor : token.start])
-        pieces.append(token.reading)
-        cursor = token.end
-    pieces.append(original[cursor:])
-    return "".join(pieces)
+        try:
+            original_start = source_indices[token.start]
+            original_end = source_indices[token.end - 1] + 1
+        except IndexError as exc:
+            raise _span_failure(
+                "processing token span cannot be mapped to original text",
+                token_index=token.index,
+                start=token.start,
+                end=token.end,
+            ) from exc
+        if original[original_start:original_end].replace("\r", "").replace("\n", "") != token.surface:
+            raise _span_failure(
+                "original text cannot reproduce the processing token",
+                token_index=token.index,
+                start=original_start,
+                end=original_end,
+            )
+        mapped.append((token, (original_start, original_end)))
+        previous_end = token.end
+    return tuple(mapped)

@@ -11,7 +11,7 @@ import yaml
 from japanmfa.domain import Token
 from japanmfa.errors import StageFailure
 
-from .japanese import normalize_katakana
+from .japanese import _map_token_spans, normalize_katakana
 
 
 @dataclass(frozen=True)
@@ -85,6 +85,7 @@ def apply_reading_overrides(
     overrides: ReadingOverrideSet,
 ) -> tuple[Token, ...]:
     """Validate every selected override, then apply all changes atomically."""
+    mapped_tokens = _map_token_spans(original, tokens)
     selected = tuple(overrides.utterances.get(utterance_id, ()))
     if not selected:
         return tokens
@@ -131,7 +132,11 @@ def apply_reading_overrides(
                 "invalid_override_kana: override kana must normalize to katakana",
                 {"utterance_id": utterance_id, "kana": override.kana},
             )
-        matches = [token for token in tokens if token.start == start and token.end == end]
+        matches = [
+            token
+            for token, (mapped_start, mapped_end) in mapped_tokens
+            if mapped_start == start and mapped_end == end
+        ]
         if len(matches) != 1 or matches[0].surface != override.surface:
             raise StageFailure(
                 "frontend",

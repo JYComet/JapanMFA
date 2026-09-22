@@ -42,6 +42,46 @@ def test_valid_override_changes_only_selected_occurrence(tmp_path: Path) -> None
     assert changed[2].reading_source == "sudachi"
 
 
+def test_override_uses_original_character_coordinates_with_linebreaks(tmp_path: Path) -> None:
+    original = " \r\n今日は\r\n晴れ  \r\n"
+    overrides = load_reading_overrides(
+        write_yaml(
+            tmp_path,
+            """utterances:
+  u1:
+    readings:
+      - span: [3, 5]
+        surface: 今日
+        kana: コンニチ
+""",
+        )
+    )
+    tokens = (token(0, 0, 2, "今日"), token(1, 2, 3, "は"), token(2, 3, 5, "晴れ"))
+    changed = apply_reading_overrides("u1", original, tokens, overrides)
+    assert changed[0].reading == "コンニチ"
+    assert changed[0].reading_source == "override"
+    assert changed[1].reading == "キョウ"
+
+
+def test_override_fails_when_original_cannot_reproduce_processing_tokens(tmp_path: Path) -> None:
+    overrides = load_reading_overrides(
+        write_yaml(
+            tmp_path,
+            """utterances:
+  u1:
+    readings:
+      - span: [0, 2]
+        surface: 今日
+        kana: コンニチ
+""",
+        )
+    )
+    tokens = (token(0, 0, 2, "今日"),)
+    with pytest.raises(StageFailure) as exc_info:
+        apply_reading_overrides("u1", "明日", tokens, overrides)
+    assert exc_info.value.reason_code == "token_span_mismatch"
+
+
 def test_override_set_can_be_empty() -> None:
     tokens = (token(0, 0, 2, "今日"),)
     assert apply_reading_overrides("missing", "今日", tokens, ReadingOverrideSet({})) == tokens
