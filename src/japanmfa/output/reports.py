@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover - this project runs on POSIX
 
 
 _RUN_ID = os.environ.get("JAPANMFA_RUN_ID") or uuid.uuid4().hex
-_SENSITIVE_COMPOUNDS = frozenset(
+_SENSITIVE_MARKERS = frozenset(
     {
         "apikey",
         "accesskey",
@@ -45,22 +45,7 @@ _STATUSES = ("aligned", "skipped", "failed")
 
 def _sensitive_key(key: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
-    if normalized in _SENSITIVE_COMPOUNDS:
-        return True
-    return any(
-        normalized.endswith(suffix)
-        for suffix in (
-            "token",
-            "secret",
-            "password",
-            "credential",
-            "authorization",
-            "auth",
-            "apikey",
-            "accesskey",
-            "privatekey",
-        )
-    )
+    return any(marker in normalized for marker in _SENSITIVE_MARKERS)
 
 
 def _secret_values() -> frozenset[str]:

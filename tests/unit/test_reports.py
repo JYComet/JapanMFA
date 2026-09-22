@@ -46,6 +46,28 @@ def test_write_json_redacts_sensitive_env_values_and_embedded_occurrences(
     assert "prefix [REDACTED] and [REDACTED] suffix" in raw
 
 
+def test_write_json_redacts_embedded_sensitive_keys_recursively(tmp_path: Path) -> None:
+    path = tmp_path / "nested-secrets.json"
+
+    write_json(
+        path,
+        {
+            "client_secret_value": "client-secret",
+            "Authorization-Header": "bearer-secret",
+            "myApiKeyValue": "api-secret",
+            "nested": [
+                {"CLIENT__SECRET__VALUE": "nested-secret"},
+                {"not_sensitive_field": "keep-this"},
+            ],
+        },
+    )
+
+    raw = path.read_text(encoding="utf-8")
+    for secret in ("client-secret", "bearer-secret", "api-secret", "nested-secret"):
+        assert secret not in raw
+    assert "keep-this" in raw
+
+
 def test_manifest_and_summary_group_outcomes_stably(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.jsonl"
     outcomes = (
