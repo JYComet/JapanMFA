@@ -1,0 +1,23 @@
+asr:
+  model: Qwen/Qwen3-ASR-1.7B
+  fallback_model: Qwen/Qwen3-ASR-0.6B
+  language: Japanese
+
+mfa:
+  acoustic_model: japanese_mfa
+  g2p_model: japanese_mfa
+
+audio:
+  sample_rate: 16000
+
+commands:
+  ffmpeg: [ffmpeg]
+  asr_worker: [python, -m, japanmfa.asr.worker]
+  mfa: [mfa]
+
+paths:
+  cache_dir: .cache/japanmfa
+  output_dir: output
+
+validation:
+  silence_labels: ["", sil, sp, spn]

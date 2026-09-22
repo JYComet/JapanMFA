@@ -1,2 +1,11 @@
 .worktrees/
 .superpowers/
+
+# Project-generated outputs and local environments.
+.cache/
+output/
+runs/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+.venv/

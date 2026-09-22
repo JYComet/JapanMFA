@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "japanmfa"
+version = "0.1.0"
+description = "Japanese-only forced alignment with five-track TextGrid output"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "PyYAML>=6.0",
+    "praatio>=6.0",
+    "pytest>=8.0",
+    "sudachipy>=0.6",
+    "sudachidict-core>=20240109",
+    "typer>=0.12",
+]
+
+[project.scripts]
+japanmfa = "japanmfa.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/japanmfa"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
