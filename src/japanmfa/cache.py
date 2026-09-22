@@ -6,6 +6,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 import uuid
 from collections.abc import Mapping, Sequence
@@ -104,10 +105,28 @@ class StageCache:
         except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
             return _MISSING
 
-    def load_or_run(self, stage: str, fingerprint: str, producer: Callable[[Path], T]) -> T:
+    def load_or_run(
+        self,
+        stage: str,
+        fingerprint: str,
+        producer: Callable[[Path], T],
+        *,
+        validate: Callable[[Path], bool] | None = None,
+        required_files: Sequence[str] = (),
+    ) -> T:
         """Return a complete cached value, or run and atomically publish *producer*."""
         final = self._stage_dir(stage, fingerprint)
         cached = self._load_complete(final, fingerprint) if final.is_dir() else _MISSING
+        if cached is not _MISSING:
+            try:
+                if any(
+                    not name or Path(name).is_absolute() or ".." in Path(name).parts
+                    or not (final / name).is_file()
+                    for name in required_files
+                ) or (validate is not None and not validate(final)):
+                    cached = _MISSING
+            except (OSError, ValueError):
+                cached = _MISSING
         if cached is not _MISSING:
             return cached  # type: ignore[return-value]
 
@@ -133,11 +152,12 @@ class StageCache:
             return value
         finally:
             if str(temporary) not in {"", "."} and temporary.exists():
-                # The path is a resolved child created by this method.
-                for child in temporary.iterdir():
-                    if child.is_file() or child.is_symlink():
-                        child.unlink(missing_ok=True)
-                temporary.rmdir()
+                # The path is a resolved child created by this method. Cleanup
+                # must never replace the producer's original exception.
+                try:
+                    shutil.rmtree(temporary)
+                except Exception:
+                    pass
 
 
 __all__ = ["StageCache", "stage_fingerprint"]

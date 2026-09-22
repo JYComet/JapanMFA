@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import shutil
+import stat
 import time
 import traceback
 from dataclasses import dataclass
@@ -31,7 +31,7 @@ from .mfa.lexicon import LockedLexicon
 from .mfa.phone_map import PhoneMap
 from .mfa.runner import MfaRunner
 from .mfa.textgrid import MfaAlignment, parse_mfa_textgrid
-from .output.reports import append_manifest, summarize, write_json
+from .output.reports import _redact_string, append_manifest, summarize, write_json
 from .output.textgrid import validate_five_tier_textgrid, write_five_tier_textgrid
 from .projection import project_annotations
 
@@ -57,6 +57,14 @@ def _duration(audio: AudioInfo, alignment: MfaAlignment) -> float:
     if positive_ends:
         return max(positive_ends)
     raise StageFailure("audio", "duration_unavailable", "audio duration is not positive")
+
+
+def _valid_audio_artifact(path: Path) -> bool:
+    try:
+        metadata = path.stat()
+    except OSError:
+        return False
+    return not path.is_symlink() and stat.S_ISREG(metadata.st_mode) and metadata.st_size > 0
 
 
 def _token_payload(tokens: tuple[Token, ...]) -> list[dict[str, object]]:
@@ -88,8 +96,29 @@ def _mora_payload(morae: Mapping[int, tuple[Mora, ...]]) -> list[dict[str, objec
 
 
 def _adapter_id(adapter: object) -> str:
-    state = getattr(adapter, "__dict__", {})
-    return f"{type(adapter).__module__}.{type(adapter).__qualname__}:{state!r}"
+    def stable(value: object) -> object:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, Mapping):
+            return {str(key): stable(item) for key, item in sorted(value.items(), key=lambda item: str(item[0]))}
+        if isinstance(value, (tuple, list)):
+            return [stable(item) for item in value]
+        if hasattr(value, "__dict__"):
+            return stable(vars(value))
+        return f"{type(value).__module__}.{type(value).__qualname__}"
+
+    state: dict[str, object] = {}
+    for name, value in sorted(getattr(adapter, "__dict__", {}).items()):
+        normalized = name.lstrip("_")
+        if normalized in {"tokenizer", "env", "runtime_object"} or callable(value):
+            continue
+        state[normalized] = stable(value)
+    import json
+
+    rendered = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return f"{type(adapter).__module__}.{type(adapter).__qualname__}:{rendered}"
 
 
 def _tokens_from_payload(payload: list[dict[str, object]]) -> tuple[Token, ...]:
@@ -227,7 +256,12 @@ class JapanMFAPipeline:
                     "working_sample_rate": info.working_sample_rate,
                 }
 
-            audio_meta = cache.load_or_run("audio", audio_fp, produce_audio)
+            audio_meta = cache.load_or_run(
+                "audio",
+                audio_fp,
+                produce_audio,
+                validate=lambda directory: _valid_audio_artifact(directory / "audio.wav"),
+            )
             cached_audio = cache.directory("audio", audio_fp) / "audio.wav"
             if not cached_audio.is_file():
                 raise StageFailure("audio", "cache_artifact_missing", "cached working audio is missing")
@@ -261,11 +295,21 @@ class JapanMFAPipeline:
                 if utterance.text_path is not None:
                     source = load_source_text(utterance.text_path)
                     if asr is not None:
-                        asr_result = asr.transcribe([audio_info.working_path]).get(audio_info.working_path)
+                        try:
+                            asr_result = asr.transcribe([audio_info.working_path]).get(audio_info.working_path)
+                        except StageFailure as exc:
+                            if exc.stage == "asr" and exc.reason_code == "non_japanese_language":
+                                raise SkipUtterance("non_japanese_language", exc.message, exc.details) from exc
+                            raise
                 else:
                     if asr is None:
                         raise StageFailure("asr", "unavailable", "ASR is required when .txt is missing")
-                    asr_result = asr.transcribe([audio_info.working_path]).get(audio_info.working_path)
+                    try:
+                        asr_result = asr.transcribe([audio_info.working_path]).get(audio_info.working_path)
+                    except StageFailure as exc:
+                        if exc.stage == "asr" and exc.reason_code == "non_japanese_language":
+                            raise SkipUtterance("non_japanese_language", exc.message, exc.details) from exc
+                        raise
                     if asr_result is None:
                         raise StageFailure("asr", "result_coverage_mismatch", "ASR returned no result")
                     source = _source_from_asr(asr_result.text)
@@ -406,7 +450,7 @@ class JapanMFAPipeline:
         except Exception as exc:  # per-item isolation boundary
             durations[current_stage] = durations.get(current_stage, time.monotonic() - started)
             trace_path = artifact_dir / "traceback.txt"
-            trace_path.write_text(traceback.format_exc(), encoding="utf-8")
+            trace_path.write_text(_redact_string(traceback.format_exc()), encoding="utf-8")
             return UtteranceOutcome(
                 utterance.utterance_id,
                 "failed",

@@ -69,6 +69,11 @@ class FakeAsr:
         return {path: ASRResult(path, "Japanese", self.text, "fake") for path in paths}
 
 
+class NonJapaneseErrorAsr:
+    def transcribe(self, _paths: list[Path]) -> dict[Path, object]:
+        raise StageFailure("asr", "non_japanese_language", "Qwen detected English")
+
+
 class FakeFrontend:
     def analyze(self, source: SourceText) -> tuple[Token, ...]:
         if "Tokyo" in source.processing:
@@ -84,6 +89,11 @@ class FakeAccent:
         if self.malformed:
             raise StageFailure("accent", "malformed_output", "bad tdmelodic")
         return {0: "キョ[ウ"}
+
+
+class ExplodingAccent:
+    def predict(self, _requests: object) -> dict[int, str]:
+        raise RuntimeError("OPENAI_API_KEY=super-secret-token")
 
 
 class FakeG2p:
@@ -146,6 +156,28 @@ def test_missing_text_with_non_japanese_asr_is_skipped(tmp_path: Path) -> None:
 
     assert result.outcomes[0].status == "skipped"
     assert result.outcomes[0].reason_code == "unsupported_japanese_text"
+
+
+def test_qwen_non_japanese_stage_failure_is_mapped_to_skipped(tmp_path: Path) -> None:
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "missing", None)
+
+    result = _pipeline(asr=NonJapaneseErrorAsr()).run(corpus, tmp_path / "output", None)
+
+    assert result.outcomes[0].status == "skipped"
+    assert result.outcomes[0].reason_code == "non_japanese_language"
+
+
+def test_unexpected_traceback_is_secret_redacted(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "super-secret-token")
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "boom")
+
+    result = _pipeline(accent=ExplodingAccent()).run(corpus, tmp_path / "output", None)
+
+    assert result.outcomes[0].reason_code == "unexpected_exception"
+    trace = (tmp_path / "output" / "boom" / "traceback.txt").read_text(encoding="utf-8")
+    assert "super-secret-token" not in trace
 
 
 def test_malformed_tdmelodic_fails_one_item_and_continues(tmp_path: Path) -> None:

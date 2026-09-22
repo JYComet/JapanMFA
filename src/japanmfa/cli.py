@@ -12,6 +12,7 @@ from typing import Annotated, Any
 import typer
 
 from .config import PipelineConfig
+from .errors import StageFailure
 from .pipeline import JapanMFAPipeline
 
 
@@ -62,6 +63,9 @@ def run(
     """Align every WAV discovered under INPUT."""
     try:
         _run(input_root, output_root, config, overrides, limit)
+    except StageFailure as exc:
+        typer.echo(f"batch setup failure: {exc.reason_code}: {exc.message}", err=True)
+        raise typer.Exit(code=1)
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"setup failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
@@ -77,6 +81,10 @@ def run_file(
 ) -> None:
     """Align one WAV using a temporary one-item corpus manifest."""
     try:
+        original_parent = audio.parent.resolve()
+        resolved_output = output_root.resolve()
+        if resolved_output == original_parent or original_parent in resolved_output.parents:
+            raise ValueError("output root must not be identical to or nested inside the input corpus")
         with tempfile.TemporaryDirectory(prefix="japanmfa-run-file-") as temporary:
             root = Path(temporary)
             copied_audio = root / audio.name
@@ -84,6 +92,9 @@ def run_file(
             if text is not None:
                 shutil.copy2(text, copied_audio.with_suffix(".txt"))
             _run(root, output_root, config, overrides)
+    except StageFailure as exc:
+        typer.echo(f"batch setup failure: {exc.reason_code}: {exc.message}", err=True)
+        raise typer.Exit(code=1)
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"setup failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc

@@ -6,6 +6,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from japanmfa.cli import app
+from japanmfa.errors import StageFailure
 
 
 runner = CliRunner()
@@ -92,9 +93,10 @@ def test_run_file_does_not_modify_source_directory(tmp_path: Path, monkeypatch) 
     text.write_text("今日は晴れ", encoding="utf-8")
     config = tmp_path / "config.yaml"
     _config(config)
+    output = tmp_path.parent / f"{tmp_path.name}-output"
 
     class FakeResult:
-        summary_path = tmp_path / "out" / "summary.json"
+        summary_path = output / "summary.json"
         summary = {"counts": {"aligned": 1, "failed": 0, "skipped": 0}}
 
     class FakePipeline:
@@ -107,7 +109,41 @@ def test_run_file_does_not_modify_source_directory(tmp_path: Path, monkeypatch) 
 
     monkeypatch.setattr("japanmfa.cli.JapanMFAPipeline", FakePipeline)
     before = sorted(path.name for path in tmp_path.iterdir())
-    result = runner.invoke(app, ["run-file", str(audio), "--text", str(text), "--output", str(tmp_path / "out"), "--config", str(config)])
+    result = runner.invoke(app, ["run-file", str(audio), "--text", str(text), "--output", str(output), "--config", str(config)])
     after = sorted(path.name for path in tmp_path.iterdir())
     assert result.exit_code == 0
     assert before == after
+
+
+def test_run_file_rejects_output_nested_in_original_audio_directory_before_copy(tmp_path: Path, monkeypatch) -> None:
+    audio = tmp_path / "one.wav"
+    audio.write_bytes(b"wav")
+    config = tmp_path / "config.yaml"
+    _config(config)
+
+    def fail_copy(*_args, **_kwargs):
+        raise AssertionError("copy must not run before path validation")
+
+    monkeypatch.setattr("japanmfa.cli.shutil.copy2", fail_copy)
+    result = runner.invoke(app, ["run-file", str(audio), "--output", str(tmp_path / "out"), "--config", str(config)])
+
+    assert result.exit_code == 1
+    assert "input corpus" in result.output.lower()
+
+
+def test_run_converts_domain_setup_failure_to_controlled_cli_error(tmp_path: Path, monkeypatch) -> None:
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    config = tmp_path / "config.yaml"
+    _config(config)
+
+    class BrokenPipeline:
+        def __init__(self, *_args, **_kwargs):
+            raise StageFailure("setup", "missing_model", "Japanese MFA model is unavailable")
+
+    monkeypatch.setattr("japanmfa.cli.JapanMFAPipeline", BrokenPipeline)
+    result = runner.invoke(app, ["run", "--input", str(corpus), "--output", str(tmp_path / "out"), "--config", str(config)])
+
+    assert result.exit_code == 1
+    assert "batch setup failure" in result.output.lower()
+    assert "traceback" not in result.output.lower()

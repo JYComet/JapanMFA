@@ -86,3 +86,48 @@ def test_stage_cache_ignores_stale_partial_directory(tmp_path: Path) -> None:
     result = cache.load_or_run("frontend", "c" * 64, lambda _path: {"fresh": True})
     assert result == {"fresh": True}
     assert json.loads((stale / "complete.json").read_text()) == {"fingerprint": "c" * 64}
+
+
+def test_stage_cache_cleans_its_temporary_tree_after_producer_exception(tmp_path: Path) -> None:
+    cache = StageCache(tmp_path / "cache")
+    fingerprint = "d" * 64
+
+    def produce(path: Path) -> None:
+        (path / "nested").mkdir()
+        (path / "nested" / "partial.bin").write_bytes(b"partial")
+        raise RuntimeError("producer failed")
+
+    with pytest.raises(RuntimeError, match="producer failed"):
+        cache.load_or_run("audio", fingerprint, produce)
+    assert not list((tmp_path / "cache" / "audio").glob(f".{fingerprint}.*"))
+
+
+def test_stage_cache_validates_required_sidecar_on_cache_hit(tmp_path: Path) -> None:
+    cache = StageCache(tmp_path / "cache")
+    fingerprint = "e" * 64
+    calls = 0
+
+    def produce(path: Path) -> dict[str, bool]:
+        nonlocal calls
+        calls += 1
+        (path / "audio.wav").write_bytes(b"non-empty")
+        return {"ok": True}
+
+    valid = lambda path: (path / "audio.wav").is_file() and (path / "audio.wav").stat().st_size > 0
+    cache.load_or_run("audio", fingerprint, produce, validate=valid)
+    (cache.directory("audio", fingerprint) / "audio.wav").write_bytes(b"")
+    cache.load_or_run("audio", fingerprint, produce, validate=valid)
+    assert calls == 2
+
+
+class _StableAdapter:
+    def __init__(self) -> None:
+        self.model = "model"
+        self.version = "1"
+        self.runtime_object = object()
+
+
+def test_adapter_identity_does_not_include_object_repr_or_address() -> None:
+    from japanmfa.pipeline import _adapter_id
+
+    assert _adapter_id(_StableAdapter()) == _adapter_id(_StableAdapter())
