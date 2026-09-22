@@ -176,3 +176,51 @@ def test_stage_cache_validates_required_files_before_first_publication(tmp_path:
     with pytest.raises(ValueError, match="artifact validation"):
         cache.load_or_run("audio", fingerprint, produce, required_files=("audio.wav",))
     assert not (cache.directory("audio", fingerprint) / "complete.json").exists()
+
+
+def test_stage_cache_rejects_symlinked_cache_root_parent_without_writing_outside(tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    link_parent = tmp_path / "link-parent"
+    link_parent.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        StageCache(link_parent / "cache").load_or_run("audio", "h" * 64, lambda _path: {"ok": True})
+    assert list(outside.iterdir()) == []
+
+
+def test_required_file_rejects_intermediate_symlink_and_rebuilds_inside_entry(tmp_path: Path) -> None:
+    cache = StageCache(tmp_path / "cache")
+    fingerprint = "i" * 64
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "audio.wav").write_bytes(b"outside")
+
+    def produce(path: Path) -> dict[str, bool]:
+        (path / "nested").mkdir()
+        (path / "nested" / "audio.wav").write_bytes(b"audio")
+        return {"ok": True}
+
+    cache.load_or_run("audio", fingerprint, produce, required_files=("nested/audio.wav",))
+    entry = cache.directory("audio", fingerprint)
+    nested = entry / "nested"
+    nested.rename(entry / "nested-real")
+    nested.symlink_to(outside, target_is_directory=True)
+
+    cache.load_or_run("audio", fingerprint, produce, required_files=("nested/audio.wav",))
+    assert (entry / "nested" / "audio.wav").read_bytes() == b"audio"
+    assert (outside / "audio.wav").read_bytes() == b"outside"
+
+
+def test_adapter_env_identity_is_stable_redacted_and_semantically_distinct() -> None:
+    from japanmfa.pipeline import _adapter_id
+
+    class Adapter:
+        def __init__(self, mode: str) -> None:
+            self._env = {"MODE": mode, "OPENAI_API_KEY": "super-secret"}
+
+    cpu_a = _adapter_id(Adapter("cpu"))
+    cpu_b = _adapter_id(Adapter("cpu"))
+    cuda = _adapter_id(Adapter("cuda"))
+    assert cpu_a == cpu_b
+    assert cpu_a != cuda
+    assert "super-secret" not in cpu_a

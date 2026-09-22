@@ -6,6 +6,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import stat
 import shutil
 import tempfile
 import uuid
@@ -84,7 +85,21 @@ class StageCache:
     """
 
     def __init__(self, root: Path) -> None:
-        self.root = Path(root)
+        configured = Path(root)
+        if ".." in configured.parts:
+            raise ValueError("cache root must not contain parent traversal")
+        self.root = configured.absolute()
+        self._assert_no_symlink_ancestors(self.root)
+
+    @staticmethod
+    def _assert_no_symlink_ancestors(path: Path) -> None:
+        current = Path(path).absolute()
+        while True:
+            if current.is_symlink():
+                raise ValueError(f"cache path component is a symlink: {current}")
+            if current.parent == current:
+                return
+            current = current.parent
 
     def _stage_dir(self, stage: str, fingerprint: str) -> Path:
         if not stage or Path(stage).name != stage or stage in {".", ".."}:
@@ -98,6 +113,7 @@ class StageCache:
             current = current / component
         if current.exists() and current.is_symlink():
             raise ValueError(f"cache path component is a symlink: {current}")
+        self._assert_no_symlink_ancestors(current)
         return current
 
     def directory(self, stage: str, fingerprint: str) -> Path:
@@ -172,12 +188,21 @@ class StageCache:
     ) -> bool:
         try:
             for name in required_files:
+                if not isinstance(name, str):
+                    return False
                 relative = Path(name)
                 if not name or relative.is_absolute() or ".." in relative.parts:
                     return False
-                path = directory / relative
+                path = directory
+                parts = relative.parts
+                if not parts or parts == (".",):
+                    return False
+                for component in parts:
+                    path = path / component
+                    if path.is_symlink():
+                        return False
                 metadata = path.stat()
-                if path.is_symlink() or not path.is_file() or metadata.st_size <= 0:
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_size <= 0:
                     return False
             return validate is None or bool(validate(directory))
         except (OSError, ValueError):

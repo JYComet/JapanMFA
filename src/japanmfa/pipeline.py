@@ -5,6 +5,8 @@ from __future__ import annotations
 import shutil
 import stat
 import json
+import hashlib
+import os
 import time
 import traceback
 from dataclasses import dataclass
@@ -97,6 +99,18 @@ def _mora_payload(morae: Mapping[int, tuple[Mora, ...]]) -> list[dict[str, objec
 
 
 def _adapter_id(adapter: object) -> str:
+    def environment_identity(value: Mapping[object, object]) -> dict[str, object]:
+        if any(not isinstance(key, str) for key in value):
+            raise TypeError("string mapping keys are required for adapter identity")
+        hashed: dict[str, object] = {}
+        for key, raw in sorted(value.items()):
+            rendered = str(raw)
+            if os.environ.get(key) == rendered:
+                continue
+            digest = hashlib.sha256(f"{key}\0{rendered}".encode("utf-8")).hexdigest()
+            hashed[key] = {"sha256": digest}
+        return {"values": hashed}
+
     def stable(value: object) -> object:
         if value is None or isinstance(value, (str, int, float, bool)):
             return value
@@ -119,7 +133,10 @@ def _adapter_id(adapter: object) -> str:
     state: dict[str, object] = {}
     for name, value in sorted(getattr(adapter, "__dict__", {}).items()):
         normalized = name.lstrip("_")
-        if normalized in {"tokenizer", "env", "runtime_object"} or callable(value):
+        if normalized in {"tokenizer", "runtime_object"} or callable(value):
+            continue
+        if normalized == "env" and isinstance(value, Mapping):
+            state[normalized] = environment_identity(value)
             continue
         state[normalized] = stable(value)
     rendered = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
