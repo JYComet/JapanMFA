@@ -1,0 +1,33 @@
+model_family: japanese_mfa_v3
+normalizations:
+  ɴ: N
+  ɡ: g
+rules:
+  - kana: [ア]
+    phones: [a]
+  - kana: [カ]
+    phones: [k, a]
+  - kana: [キョ]
+    phones: [k, jo]
+  - kana: [ン]
+    phones: [N]
+  - kana: [ッ]
+    phones: [Q]
+  - kana: [オ]
+    phones: [o]
+  - kana: [オ, ー]
+    phones: [oː]
+  - kana: [オ, ー]
+    phones: [o]
+  - kana: [オ, ー]
+    phones: [o, o]
+  - kana: [ハ]
+    phones: [h, a]
+  - kana: [レ]
+    phones: [r, e]
+  - kana: [ウ]
+    phones: [u]
+  - kana: [ス]
+    phones: [s, ɯ]
+  - kana: [ス]
+    phones: [s, ɯ̥]
