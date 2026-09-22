@@ -1,6 +1,7 @@
 """Safe FFmpeg conversion into a normalized working audio copy."""
 
 import os
+import stat
 import subprocess
 import wave
 from dataclasses import dataclass
@@ -34,6 +35,15 @@ def _source_metadata(path: Path) -> tuple[float, int, int]:
         return 0.0, 0, 0
 
 
+def _cleanup_partial(partial: Path) -> str | None:
+    """Best-effort cleanup; return an error without masking the primary failure."""
+    try:
+        partial.unlink(missing_ok=True)
+    except OSError as exc:
+        return str(exc)
+    return None
+
+
 class AudioNormalizer:
     def __init__(self, config: PipelineConfig | None = None) -> None:
         self.config = config or PipelineConfig()
@@ -43,8 +53,25 @@ class AudioNormalizer:
         destination = Path(destination)
         partial = destination.with_suffix(".partial.wav")
         duration, source_sample_rate, source_channels = _source_metadata(source)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        partial.unlink(missing_ok=True)
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise StageFailure(
+                "audio",
+                "destination_directory_failed",
+                f"could not prepare audio destination directory: {destination.parent}",
+                {"destination": str(destination), "error": str(exc)},
+            ) from exc
+
+        try:
+            partial.unlink(missing_ok=True)
+        except OSError as exc:
+            raise StageFailure(
+                "audio",
+                "partial_cleanup_failed",
+                f"could not remove stale partial audio: {partial}",
+                {"partial": str(partial), "error": str(exc)},
+            ) from exc
 
         argv = [
             *self.config.commands.ffmpeg,
@@ -63,30 +90,63 @@ class AudioNormalizer:
         try:
             subprocess.run(argv, check=True, capture_output=True, text=True)
         except (OSError, subprocess.CalledProcessError) as exc:
-            partial.unlink(missing_ok=True)
+            cleanup_error = _cleanup_partial(partial)
             stderr = getattr(exc, "stderr", None)
+            details = {
+                "source": str(source),
+                "destination": str(destination),
+                "returncode": getattr(exc, "returncode", None),
+                "stderr": stderr or str(exc),
+            }
+            if cleanup_error is not None:
+                details["partial_cleanup_error"] = cleanup_error
             raise StageFailure(
                 "audio",
                 "ffmpeg_failed",
                 f"ffmpeg failed while normalizing {source}",
-                {
-                    "source": str(source),
-                    "destination": str(destination),
-                    "returncode": getattr(exc, "returncode", None),
-                    "stderr": stderr or str(exc),
-                },
+                details,
             ) from exc
 
-        if not partial.is_file() or partial.stat().st_size == 0:
-            partial.unlink(missing_ok=True)
+        try:
+            partial_stat = partial.stat()
+        except OSError as exc:
+            cleanup_error = _cleanup_partial(partial)
+            details = {"source": str(source), "destination": str(destination), "error": str(exc)}
+            if cleanup_error is not None:
+                details["partial_cleanup_error"] = cleanup_error
+            raise StageFailure(
+                "audio",
+                "output_stat_failed",
+                f"could not inspect working audio: {partial}",
+                details,
+            ) from exc
+
+        if not stat.S_ISREG(partial_stat.st_mode) or partial_stat.st_size == 0:
+            cleanup_error = _cleanup_partial(partial)
+            details = {"source": str(source), "destination": str(destination)}
+            if cleanup_error is not None:
+                details["partial_cleanup_error"] = cleanup_error
             raise StageFailure(
                 "audio",
                 "empty_output",
                 f"ffmpeg produced no working audio: {partial}",
-                {"source": str(source), "destination": str(destination)},
+                details,
             )
 
-        os.replace(partial, destination)
+        try:
+            os.replace(partial, destination)
+        except OSError as exc:
+            cleanup_error = _cleanup_partial(partial)
+            details = {"source": str(source), "destination": str(destination), "error": str(exc)}
+            if cleanup_error is not None:
+                details["partial_cleanup_error"] = cleanup_error
+            raise StageFailure(
+                "audio",
+                "atomic_replace_failed",
+                f"could not publish working audio: {destination}",
+                details,
+            ) from exc
+
         return AudioInfo(
             source_path=source,
             working_path=destination,
