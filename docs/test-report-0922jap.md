@@ -2,18 +2,24 @@
 
 Date: **2026-09-22**
 
-This is a real, read-only preflight report. The gate failed before any corpus
+This is a real preflight report. The gate failed before any corpus
 transcription, MFA alignment, or five-tier output could be run. No alignment
-result is claimed by this report.
+result is claimed by this report. The inventory commands were read-only; the
+preflight writeability probe wrote only beneath a temporary directory. No mount
+permission verification was performed.
 
 ## Corpus and safety boundary
 
 - Source resolved from `\\RS3621\Research_TTS\Data\Raw\0922jap` to
   `/mnt/Raw/0922jap`.
-- The source was readable and contained **5 WAV files and 0 TXT files** at the
-  time of the check.
-- The source was treated as read-only; the check did not write to it.
-- Temporary output and cache locations were writable.
+- A read-only `find` inventory returned five files, all ending in `.wav`; the
+  combined inventory count was 5, so the `.txt` count was 0.
+- All executed commands used the source only as an input to `find`/inspection
+  and no command selected it as an output path. This is an operational
+  handling statement, not proof of mount-level read-only permissions.
+- Temporary output and cache locations were writable according to the
+  programmatic preflight: `run_preflight` injected `PathConfig` paths under
+  `TemporaryDirectory`, and both `_writable` checks passed.
 
 ## Preflight results
 
@@ -29,17 +35,22 @@ result is claimed by this report.
 | Temporary output/cache writeability | PASS | Temporary locations accepted writes |
 | Overall preflight gate | **FAIL** | Required Japanese MFA and tdmelodic artifacts are unavailable |
 
-Additional read-only artifact evidence:
+Additional artifact evidence and how it was obtained:
 
 - `/home/user/ja-en-task-artifacts/japanese_mfa-v3.0.0.zip` exists and is
-  `92,191,596` bytes. Acoustic model inspection exited `0`, but the model is
-  not registered in the target MFA environment.
+  `92,191,596` bytes. The size came from the read-only `find` size inventory;
+  acoustic model inspection exited `0`, but the model is not registered in the
+  target MFA environment.
 - `/home/user/ja-en-task-artifacts/japanese_mfa-v3.0.0.dict` exists and is
-  `21,264,022` bytes. Its presence does not provide a registered G2P model.
-- No Japanese G2P ZIP was found locally.
-- No `SudachiPy` was found in the base, ASR, or `mfa-dev` environments.
-  An older independent `frontend-venv` has `SudachiPy`, but lacks PyYAML and
-  the complete target environment; it is not used as this project's runtime.
+  `21,264,022` bytes. The size came from the same read-only `find` size
+  inventory. Its presence does not provide a registered G2P model.
+- No Japanese G2P ZIP was found locally: the read-only search returned only
+  `japanese_mfa-v3.0.0.zip` among the Japanese MFA ZIP name patterns.
+- No `SudachiPy` was found in the base, ASR, or `mfa-dev` environments. The
+  conda-environment loop below queried `find_spec('sudachipy')` and returned
+  false for all three. An older independent `frontend-venv` has `SudachiPy`,
+  but lacks PyYAML and the complete target environment; it is not used as this
+  project's runtime.
 - The ASR environment reports Python `3.10.20`, `torch 2.9.1+cu128`, and
   CUDA available; the Qwen3-ASR version is unknown. The target Python 3.12
   ASR environment has not been provisioned.
@@ -69,21 +80,22 @@ shell read-only inspections. The reproducible inspections actually used were:
 
 ```text
 conda env list
-find /mnt/Raw/0922jap -maxdepth 1 -type f -o -type d 2>/dev/null | head -20
-find /home/user -maxdepth 4 -type d \( -iname '*japanmfa*' -o -iname '*qwen3*' -o -iname '*mfa*' -o -iname '*tdmelodic*' \) 2>/dev/null | head -100
-find /home/user -maxdepth 5 -type d -iname '*tdmelodic*' 2>/dev/null | head -50
-find /home/user/.cache/huggingface/hub/models--Qwen--Qwen3-ASR-1.7B -maxdepth 2 -type f -o -type l 2>/dev/null | head -20
+find /mnt/Raw/0922jap -maxdepth 1 -type f \( -iname '*.wav' -o -iname '*.txt' \)
+find /home/user/ja-en-task-artifacts -maxdepth 4 -type f -printf '%p %s\n'
+find /home/user -maxdepth 9 -type f \( -iname 'japanese_mfa*.zip' -o -iname 'japanese*katakana*.zip' \)
+for env in base asr mfa-dev; do conda run -n "$env" python -c "import sys, importlib.util; print(sys.executable, bool(importlib.util.find_spec('sudachipy')))"; done
 conda run -n mfa-dev mfa model list acoustic
 conda run -n mfa-dev mfa model list g2p
-conda run -n mfa-dev python --version
-conda run -n asr python --version
-conda run -n asr python -c "import importlib.util; print('qwen_asr', bool(importlib.util.find_spec('qwen_asr'))); print('torch', bool(importlib.util.find_spec('torch')))"
-docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | rg -i 'tdmelodic|japan|mfa|qwen'
+findmnt -rn -o TARGET,SOURCE,FSTYPE,OPTIONS | rg -i 'RS3621|0922jap|Research_TTS|cifs|smb' || true
 ```
 
 These commands only enumerated existing files, registered models, or runtime
-metadata. They did not install packages, create environments, download
-artifacts, or modify the source corpus.
+metadata. The `find` result for the corpus contained five `.wav` paths and no
+`.txt` paths; the artifact-size result supplied the two byte counts above; the
+Japanese ZIP search returned only the acoustic ZIP. They did not install
+packages, create environments, download artifacts, or modify the source
+corpus. The `findmnt` result was informational only and did not prove mount
+permissions.
 
 The Qwen runtime probe initially exceeded its timeout; after the 30-second
 timeout handling fix it passed. This is a runtime check only, not an ASR
