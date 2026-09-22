@@ -45,20 +45,45 @@ Additional read-only artifact evidence:
   ASR environment has not been provisioned.
 - No tdmelodic executable or image and no UniDic 2.1.2 archive were found.
 
-## Checks performed and commands
+## Checks performed and reproducible commands
 
-The following executable entry points and artifact inspections were used for
-the gate; no install, download, Docker build, or source-corpus write was
-performed:
+The following bounded probes were actually executed for the gate. They are
+shown with their full executable paths; no install, download, Docker build, or
+source-corpus write was performed:
 
 ```text
-/home/user/miniconda3/envs/mfa-dev/bin/mfa --version
-/home/user/miniconda3/envs/mfa-dev/bin/mfa --help
-/home/user/miniconda3/envs/asr/bin/python       # Qwen runtime probe
-MFA acoustic archive inspection for
-  /home/user/ja-en-task-artifacts/japanese_mfa-v3.0.0.zip
-Read-only artifact/environment availability checks for the paths above
+/home/user/miniconda3/envs/mfa-dev/bin/mfa version
+/home/user/miniconda3/envs/mfa-dev/bin/mfa g2p --help
+/home/user/miniconda3/envs/mfa-dev/bin/mfa validate --help
+/home/user/miniconda3/envs/mfa-dev/bin/mfa align --help
+/home/user/miniconda3/envs/asr/bin/python -c "import qwen_asr; print(getattr(qwen_asr, '__version__', 'unknown'))"
+/home/user/miniconda3/envs/mfa-dev/bin/mfa model inspect acoustic /home/user/ja-en-task-artifacts/japanese_mfa-v3.0.0.zip
 ```
+
+The acoustic archive inspection exited `0`; this inspected archive is still
+not registered in the target MFA environment. The G2P registration check
+remained `model_unavailable` because no local Japanese G2P ZIP was found.
+
+The remaining inventory, environment, and writeability results came from
+shell read-only inspections. The reproducible inspections actually used were:
+
+```text
+conda env list
+find /mnt/Raw/0922jap -maxdepth 1 -type f -o -type d 2>/dev/null | head -20
+find /home/user -maxdepth 4 -type d \( -iname '*japanmfa*' -o -iname '*qwen3*' -o -iname '*mfa*' -o -iname '*tdmelodic*' \) 2>/dev/null | head -100
+find /home/user -maxdepth 5 -type d -iname '*tdmelodic*' 2>/dev/null | head -50
+find /home/user/.cache/huggingface/hub/models--Qwen--Qwen3-ASR-1.7B -maxdepth 2 -type f -o -type l 2>/dev/null | head -20
+conda run -n mfa-dev mfa model list acoustic
+conda run -n mfa-dev mfa model list g2p
+conda run -n mfa-dev python --version
+conda run -n asr python --version
+conda run -n asr python -c "import importlib.util; print('qwen_asr', bool(importlib.util.find_spec('qwen_asr'))); print('torch', bool(importlib.util.find_spec('torch')))"
+docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | rg -i 'tdmelodic|japan|mfa|qwen'
+```
+
+These commands only enumerated existing files, registered models, or runtime
+metadata. They did not install packages, create environments, download
+artifacts, or modify the source corpus.
 
 The Qwen runtime probe initially exceeded its timeout; after the 30-second
 timeout handling fix it passed. This is a runtime check only, not an ASR
