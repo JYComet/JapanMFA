@@ -30,6 +30,7 @@ _MFA_PRODUCT_VERSION_RE = re.compile(
     re.IGNORECASE,
 )
 _DEFAULT_TIMEOUT = 8.0
+_QWEN_TIMEOUT = 30.0
 _PROBE_SURFACE = "日本語"
 _PROBE_YOMI = "ニホンゴ"
 _SENSITIVE_MARKER_RE = re.compile(
@@ -376,9 +377,9 @@ def run_preflight(config: PipelineConfig) -> PreflightReport:
         _mfa_help(config, timeout),
         _mfa_model(config, "acoustic", timeout),
         _mfa_model(config, "g2p", timeout),
-        _asr_runtime(config, timeout),
+        _asr_runtime(config, _QWEN_TIMEOUT),
         _asr_model(config),
-        _qwen_cuda(config, timeout),
+        _qwen_cuda(config, _QWEN_TIMEOUT),
         _tdmelodic_probe(timeout),
         _writable("output", config.paths.output_dir),
         _writable("cache", config.paths.cache_dir),

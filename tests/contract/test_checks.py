@@ -292,6 +292,43 @@ def test_run_preflight_signature_is_stable() -> None:
     assert list(inspect.signature(run_preflight).parameters) == ["config"]
 
 
+def test_preflight_uses_longer_bound_only_for_qwen_probes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fake = _fake(tmp_path)
+    model = tmp_path / "qwen-model"
+    model.mkdir()
+    monkeypatch.setenv("JAPANMFA_ASR_MODEL_PATH", str(model))
+    monkeypatch.setenv("JAPANMFA_REQUIRE_CUDA", "1")
+    monkeypatch.setenv("JAPANMFA_TDMELODIC_COMMAND", f"{sys.executable} {fake} tdmelodic")
+    calls: list[tuple[tuple[str, ...], float]] = []
+
+    def fake_run(command, *, input_text=None, timeout):
+        argv = tuple(command)
+        calls.append((argv, timeout))
+        if "version" in argv:
+            return "3.3.9\n", "", 0, None
+        if "model" in argv:
+            return "model present\n", "", 0, None
+        if "--help" in argv:
+            return "Usage: fake\n", "", 0, None
+        if any("qwen_asr" in part for part in argv):
+            return "qwen_asr 0.1.0\n", "", 0, None
+        if any("cuda.is_available" in part for part in argv):
+            return "True\n", "", 0, None
+        return "ニホンゴ\n", "", 0, None
+
+    monkeypatch.setattr("japanmfa.checks._run", fake_run)
+    report = run_preflight(_config(tmp_path, fake))
+
+    assert report.ok
+    qwen_timeouts = [timeout for command, timeout in calls if any("qwen_asr" in part for part in command)]
+    cuda_timeouts = [timeout for command, timeout in calls if any("cuda.is_available" in part for part in command)]
+    assert qwen_timeouts == [30.0]
+    assert cuda_timeouts == [30.0]
+    assert all(timeout == 8.0 for command, timeout in calls if "mfa" in command or "tdmelodic" in command)
+
+
 def test_tdmelodic_wrapper_executes_docker_with_immutable_commit(tmp_path: Path) -> None:
     fake_docker = tmp_path / "docker"
     argv_file = tmp_path / "docker-argv"
