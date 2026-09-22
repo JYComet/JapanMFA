@@ -1,0 +1,30 @@
+# Accent and phone mapping
+
+For every pronounced Sudachi token, JapanMFA calls exactly
+`tdmelodic sy2a(surface, yomi)`, where `yomi` is the already locked reading.
+tdmelodic may add bracket events but cannot replace the reading. The parser
+normalizes hiragana/katakana, verifies that the unmarked output equals the
+locked reading, and assigns exactly one `H` or `L` to each mora.
+
+The mora sequence is then paired with the single MFA-G2P phone sequence selected
+for that token occurrence. MFA alignment is run against safe per-occurrence
+ASCII aliases and a locked dictionary, so repeated surface forms cannot select
+another pronunciation. MFA v3 supplies the final boundaries.
+
+For each MFA phone:
+
+- one contributing mora broadcasts its kana and tone;
+- multiple phones from one mora repeat that mora's labels;
+- a phone spanning multiple morae uses ordered labels, e.g. `オ|ー` and `H|L`;
+- silence has empty `phone_kana` and `phone_tone` labels;
+- no internal boundary is fabricated inside a single MFA interval.
+
+The H/L long-phone rule is exact: when a long phone covers differently toned
+morae, `phone_tone` contains the ordered composite joined by `|` (for example,
+`H|L`), preserving mora order. A repeated same tone may remain a single label.
+The original and kana tiers remain whole utterances; only the three lower tiers
+share MFA boundaries.
+
+Malformed brackets, reading mismatch, mora-count mismatch, unknown MFA phones,
+or word/phone order mismatch fail closed with a reason code. They never trigger
+a guessed accent or a made-up time split.

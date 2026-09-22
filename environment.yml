@@ -1,0 +1,16 @@
+name: japanmfa
+channels:
+  - conda-forge
+dependencies:
+  # The orchestrator is intentionally separate from MFA and Qwen.
+  - python=3.11
+  - pip=25.0
+  - ffmpeg=7.1
+  - pip:
+      - PyYAML==6.0.2
+      - praatio==6.2.0
+      - sudachipy==0.6.10
+      - sudachidict-core==20240109
+      - typer==0.15.2
+      - pytest==8.3.5
+      - -e .

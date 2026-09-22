@@ -1,0 +1,13 @@
+name: japanmfa-asr
+channels:
+  - conda-forge
+dependencies:
+  # Python follows the Qwen3-ASR isolated-environment quickstart.
+  - python=3.12
+  - pip=25.0
+  - pip:
+      # The package/version must be checked against the Qwen release used by
+      # the deployment. No qwen_asr package is installed in this checkout.
+      - qwen-asr==0.0.6
+      - torch==2.6.0
+      - transformers==4.51.3
