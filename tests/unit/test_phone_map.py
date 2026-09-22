@@ -36,6 +36,17 @@ def test_phone_map_rejects_model_family_mismatch(tmp_path: Path) -> None:
     )
 
 
+def test_phone_map_model_family_cannot_be_overridden(tmp_path: Path) -> None:
+    path = tmp_path / "map.yaml"
+    path.write_text(
+        "model_family: another_model\nnormalizations: {}\nrules:\n  - kana: [ア]\n    phones: [a]\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(TypeError):
+        PhoneMap.load(path, model_family="another_model")
+
+
 def test_phone_map_rejects_duplicate_rules_and_unknown_fields(tmp_path: Path) -> None:
     path = tmp_path / "map.yaml"
     path.write_text(
@@ -71,6 +82,46 @@ rules:
     )
     with pytest.raises(StageFailure) as exc_info:
         PhoneMap.load(path)
+    assert exc_info.value.reason_code == "duplicate_rule"
+
+
+@pytest.mark.parametrize(
+    "rules, normalizations",
+    [
+        (
+            """
+  - kana: [ア]
+    phones: [a]
+    cost: 0
+  - kana: [ア]
+    phones: [a]
+    cost: 2
+""",
+            "{}",
+        ),
+        (
+            """
+  - kana: [ア]
+    phones: [ɴ]
+  - kana: [ア]
+    phones: [N]
+""",
+            "ɴ: N",
+        ),
+    ],
+)
+def test_phone_map_rejects_semantically_duplicate_rules(
+    tmp_path: Path, rules: str, normalizations: str
+) -> None:
+    path = tmp_path / "map.yaml"
+    path.write_text(
+        f"model_family: japanese_mfa_v3\nnormalizations:\n  {normalizations}\nrules:\n{rules}",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StageFailure) as exc_info:
+        PhoneMap.load(path)
+
     assert exc_info.value.reason_code == "duplicate_rule"
 
 

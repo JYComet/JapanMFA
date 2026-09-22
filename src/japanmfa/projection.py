@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import unicodedata
 from typing import cast
 
 from japanmfa.domain import Mora, PhoneAnnotation, PhoneInterval
@@ -14,6 +15,16 @@ from japanmfa.mfa.textgrid import MfaAlignment, MfaPhone
 
 def _failure(reason_code: str, message: str, **details: object) -> StageFailure:
     return StageFailure("projection", reason_code, message, details)
+
+
+def _canonical_kana(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    return "".join(
+        chr(ord(character) + 0x60)
+        if "ぁ" <= character <= "ゖ"
+        else character
+        for character in normalized
+    )
 
 
 def labels_for_phone(morae: tuple[Mora, ...]) -> tuple[str, str]:
@@ -108,6 +119,23 @@ def _validate_token_morae(lexicon: LockedLexicon, token_morae: dict[int, tuple[M
                 "mora_coverage_mismatch",
                 "token morae must be non-empty and belong to their token",
                 token_index=token.index,
+            )
+        if any(mora.index_in_token != index for index, mora in enumerate(morae)):
+            raise _failure(
+                "mora_reading_mismatch",
+                "token mora indices must be contiguous and ordered",
+                token_index=token.index,
+                indices=[mora.index_in_token for mora in morae],
+            )
+        reconstructed = "".join(_canonical_kana(mora.kana) for mora in morae)
+        locked = _canonical_kana(token.reading)
+        if reconstructed != locked:
+            raise _failure(
+                "mora_reading_mismatch",
+                "token morae must reconstruct the locked token reading",
+                token_index=token.index,
+                reconstructed=reconstructed,
+                locked=locked,
             )
 
 

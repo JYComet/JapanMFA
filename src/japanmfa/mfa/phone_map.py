@@ -60,8 +60,6 @@ class PhoneMap:
     def load(
         cls,
         path: Path,
-        *,
-        model_family: str = EXPECTED_MODEL_FAMILY,
     ) -> "PhoneMap":
         path = Path(path)
         try:
@@ -85,17 +83,17 @@ class PhoneMap:
                 fields=sorted(str(item) for item in unknown),
             )
         configured = raw.get("model_family")
-        if configured != model_family:
+        if configured != EXPECTED_MODEL_FAMILY:
             raise _failure(
                 "model_family_mismatch",
-                f"phone map model family must be {model_family!r}",
+                f"phone map model family must be {EXPECTED_MODEL_FAMILY!r}",
                 configured=configured,
-                expected=model_family,
+                expected=EXPECTED_MODEL_FAMILY,
             )
 
         normalizations = _parse_normalizations(raw.get("normalizations", {}))
-        rules = _parse_rules(raw.get("rules"))
-        return cls(model_family, tuple(normalizations.items()), tuple(rules))
+        rules = _parse_rules(raw.get("rules"), normalizations)
+        return cls(EXPECTED_MODEL_FAMILY, tuple(normalizations.items()), tuple(rules))
 
     @property
     def normalization_aliases(self) -> Mapping[str, str]:
@@ -131,11 +129,11 @@ def _parse_normalizations(raw: object) -> dict[str, str]:
     return result
 
 
-def _parse_rules(raw: object) -> list[PhoneRule]:
+def _parse_rules(raw: object, normalizations: Mapping[str, str]) -> list[PhoneRule]:
     if not isinstance(raw, list) or not raw:
         raise _failure("invalid_rules", "rules must be a non-empty array")
     rules: list[PhoneRule] = []
-    seen: set[tuple[tuple[str, ...], tuple[str, ...], int]] = set()
+    seen: set[tuple[tuple[str, ...], tuple[str, ...]]] = set()
     for index, item in enumerate(raw):
         if not isinstance(item, Mapping):
             raise _failure("invalid_rule", "each phone-map rule must be a mapping", index=index)
@@ -159,11 +157,11 @@ def _parse_rules(raw: object) -> list[PhoneRule]:
             isinstance(value, str) and value for value in phones
         ):
             raise _failure("invalid_rule", "rule phones must be a non-empty string array", index=index)
-        phones_tuple = tuple(phones)
+        phones_tuple = tuple(normalizations.get(phone, phone) for phone in phones)
         cost = item.get("cost", 0)
         if isinstance(cost, bool) or not isinstance(cost, int) or cost < 0:
             raise _failure("invalid_rule", "rule cost must be a non-negative integer", index=index)
-        identity = (kana_tuple, phones_tuple, cost)
+        identity = (kana_tuple, phones_tuple)
         if identity in seen:
             raise _failure("duplicate_rule", "phone-map rules must be unique", index=index)
         seen.add(identity)

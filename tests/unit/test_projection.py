@@ -100,6 +100,18 @@ def test_projection_reconciles_palatalized_word_with_following_vowel() -> None:
     assert [item.tone_label for item in annotations] == ["H", "H", "L"]
 
 
+def test_projection_reconciles_explicit_devoiced_vowel_spelling() -> None:
+    lexicon = _lexicon("ス", ("s", "ɯ̥"))
+    alignment = _alignment((("s", 0.0, 0.1, False), ("ɯ̥", 0.1, 0.2, False)))
+
+    annotations = project_annotations(
+        alignment, lexicon, {0: _morae(("ス", "L"))}, PHONE_MAP
+    )
+
+    assert [item.kana_label for item in annotations] == ["ス", "ス"]
+    assert [item.tone_label for item in annotations] == ["L", "L"]
+
+
 def test_projection_emits_silence_with_blank_labels_and_no_token() -> None:
     lexicon = _lexicon("ア", ("a",))
     alignment = _alignment((("sil", 0.0, 0.1, True), ("a", 0.1, 0.2, False)))
@@ -162,6 +174,32 @@ def test_projection_requires_exact_alias_order_and_phone_sequence() -> None:
     with pytest.raises(StageFailure) as exc_info:
         project_annotations(bad_phones, lexicon, {0: _morae(("ア", "H"))}, PHONE_MAP)
     assert exc_info.value.reason_code == "phone_sequence_mismatch"
+
+
+def test_projection_rejects_mora_kana_that_does_not_reconstruct_locked_reading() -> None:
+    lexicon = _lexicon("ア", ("a",))
+    alignment = _alignment((("a", 0.0, 1.0, False),))
+
+    with pytest.raises(StageFailure) as exc_info:
+        project_annotations(alignment, lexicon, {0: _morae(("イ", "H"))}, PHONE_MAP)
+
+    assert exc_info.value.reason_code == "mora_reading_mismatch"
+
+
+def test_projection_rejects_mora_order_that_does_not_reconstruct_locked_reading() -> None:
+    token = Token(0, 0, 2, "アカ", ("名詞",), "アカ", "override")
+    lexicon = LockedLexicon.build("utt", (token,), (Pronunciation("アカ", ("k", "a")),))
+    alignment = _alignment((("k", 0.0, 0.5, False), ("a", 0.5, 1.0, False)))
+
+    with pytest.raises(StageFailure) as exc_info:
+        project_annotations(
+            alignment,
+            lexicon,
+            {0: _morae(("カ", "H"), ("ア", "L"))},
+            PHONE_MAP,
+        )
+
+    assert exc_info.value.reason_code == "mora_reading_mismatch"
 
 
 def test_labels_for_phone_rejects_unlabeled_mora() -> None:
