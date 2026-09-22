@@ -52,6 +52,21 @@ _SENSITIVE_ENV_MARKERS = frozenset(
         "token",
     }
 )
+_GENERIC_SECRET_VALUES = frozenset(
+    {
+        "accesskey",
+        "accesstoken",
+        "apikey",
+        "auth",
+        "authorization",
+        "credential",
+        "key",
+        "password",
+        "privatekey",
+        "secret",
+        "token",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -123,7 +138,8 @@ def _redact_text(value: str) -> str:
         normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
         if not secret or not any(marker in normalized for marker in _SENSITIVE_ENV_MARKERS):
             continue
-        if len(secret) <= 2:
+        normalized_secret = re.sub(r"[^a-z0-9]", "", secret.casefold())
+        if normalized_secret in _GENERIC_SECRET_VALUES:
             value = re.sub(
                 rf"(?<![A-Za-z0-9]){re.escape(secret)}(?![A-Za-z0-9])",
                 "[REDACTED]",

@@ -43,9 +43,14 @@ a 40-character immutable upstream commit and invokes Docker only after that
 check:
 
 ```bash
-TDMELODIC_COMMIT=<40-character-tdmelodic-sha> \
-  tools/build_tdmelodic_image.sh
+export TDMELODIC_COMMIT=0123456789abcdef0123456789abcdef01234567
+export TDMELODIC_UNIDIC_ARCHIVE=/project-owned/downloads/unidic-mecab_kana-accent-2.1.2_src.zip
+export TDMELODIC_UNIDIC_SHA256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+tools/build_tdmelodic_image.sh
 ```
+
+Replace the example SHA values and archive path with the real upstream commit,
+archive, and publisher checksum before running.
 
 The resulting tag defaults to the first 12 characters of that SHA. The wrapper
 requires a manually obtained official `unidic-mecab_kana-accent-2.1.2_src.zip`
@@ -53,8 +58,9 @@ archive and its expected SHA256:
 
 ```bash
 export TDMELODIC_UNIDIC_ARCHIVE=/project-owned/downloads/unidic-mecab_kana-accent-2.1.2_src.zip
-export TDMELODIC_UNIDIC_SHA256=<sha256-from-the-official-archive-release>
-TDMELODIC_COMMIT=<40-character-tdmelodic-sha> tools/build_tdmelodic_image.sh
+export TDMELODIC_UNIDIC_SHA256=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+export TDMELODIC_COMMIT=0123456789abcdef0123456789abcdef01234567
+tools/build_tdmelodic_image.sh
 ```
 
 Obtain that archive once from the tdmelodic upstream distribution/release

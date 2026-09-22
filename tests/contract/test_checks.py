@@ -4,6 +4,7 @@ import json
 import hashlib
 import inspect
 import os
+import re
 import subprocess
 import stat
 import sys
@@ -175,6 +176,48 @@ def test_preflight_redacts_sensitive_values_and_embedded_environment_secrets(
     assert "tokenizer" in ordinary_rendered
     assert "tokenization-model" in ordinary_rendered
     assert "ak" not in ordinary_rendered
+    embedded = _check(
+        "embedded",
+        False,
+        "command_failed",
+        "prefixak-suffix",
+        "prefixak-suffix",
+        ["prefixak-suffix"],
+    )
+    embedded_rendered = json.dumps(embedded.as_dict())
+    assert "prefixak-suffix" not in embedded_rendered
+    assert "ak" not in embedded_rendered
+
+
+def test_generic_marker_secret_uses_boundaries_without_overredacting_names(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("JAPANMFA_SECRET", "token")
+    safe = _check(
+        "ordinary",
+        False,
+        "command_failed",
+        "/tmp/tokenizer tokenization-model token",
+        "retry tokenization-model",
+        ["/tmp/tokenizer", "tokenization-model", "token"],
+    )
+
+    rendered = json.dumps(safe.as_dict())
+    assert "/tmp/tokenizer" in rendered
+    assert "tokenization-model" in rendered
+    assert '"token"' not in rendered
+
+
+def test_readme_wrapper_example_is_complete_and_copyable() -> None:
+    readme = (Path(__file__).parents[2] / "README.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```bash\n(.*?)```", readme, flags=re.DOTALL)
+    build_blocks = [block for block in blocks if "build_tdmelodic_image.sh" in block]
+
+    assert build_blocks
+    assert all(
+        all(name in block for name in ("TDMELODIC_COMMIT", "TDMELODIC_UNIDIC_ARCHIVE", "TDMELODIC_UNIDIC_SHA256"))
+        for block in build_blocks
+    )
 
 
 def test_absent_japanese_models_are_reported_separately(tmp_path: Path, monkeypatch) -> None:
