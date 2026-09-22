@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import inspect
 import os
 import subprocess
@@ -161,6 +162,19 @@ def test_preflight_redacts_sensitive_values_and_embedded_environment_secrets(
     assert "embedded-api-secret" not in safe_rendered
     assert "my_api_key_value" not in safe_rendered
     assert "authorization_header" not in safe_rendered
+    monkeypatch.setenv("JAPANMFA_SECRET", "ak")
+    ordinary = _check(
+        "ordinary",
+        False,
+        "command_failed",
+        "/tmp/tokenizer tokenization-model ACCESS_KEY=ak",
+        "retry tokenizer",
+        ["/tmp/tokenizer", "tokenization-model", "ACCESS_KEY=ak"],
+    )
+    ordinary_rendered = json.dumps(ordinary.as_dict())
+    assert "tokenizer" in ordinary_rendered
+    assert "tokenization-model" in ordinary_rendered
+    assert "ak" not in ordinary_rendered
 
 
 def test_absent_japanese_models_are_reported_separately(tmp_path: Path, monkeypatch) -> None:
@@ -240,17 +254,24 @@ def test_tdmelodic_wrapper_executes_docker_with_immutable_commit(tmp_path: Path)
     argv_file = tmp_path / "docker-argv"
     fake_docker.write_text(
         "#!/usr/bin/env python3\n"
-        "import os, pathlib, sys\n"
-        "pathlib.Path(os.environ['FAKE_DOCKER_ARGV']).write_text('\\n'.join(sys.argv[1:]))\n",
+        "import json, os, pathlib, sys\n"
+        "context = pathlib.Path(sys.argv[-1])\n"
+        "payload = {'argv': sys.argv[1:], 'context': str(context), 'context_exists': context.is_dir(), 'files': sorted(p.name for p in context.iterdir())}\n"
+        "pathlib.Path(os.environ['FAKE_DOCKER_ARGV']).write_text(json.dumps(payload))\n",
         encoding="utf-8",
     )
     fake_docker.chmod(0o755)
+    archive = tmp_path / "unidic.zip"
+    archive.write_bytes(b"fake-unidic-archive")
+    archive_sha = hashlib.sha256(archive.read_bytes()).hexdigest()
     commit = "0123456789abcdef" * 2 + "01234567"
     env = {
         **os.environ,
         "DOCKER_BIN": str(fake_docker),
         "FAKE_DOCKER_ARGV": str(argv_file),
         "TDMELODIC_COMMIT": commit,
+        "TDMELODIC_UNIDIC_ARCHIVE": str(archive),
+        "TDMELODIC_UNIDIC_SHA256": archive_sha,
     }
 
     subprocess.run(
@@ -261,12 +282,16 @@ def test_tdmelodic_wrapper_executes_docker_with_immutable_commit(tmp_path: Path)
         env=env,
     )
 
-    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    payload = json.loads(argv_file.read_text(encoding="utf-8"))
+    argv = payload["argv"]
     assert argv[0:2] == ["build", "--build-arg"]
     assert f"TDMELODIC_COMMIT={commit}" in argv
     assert "--file" in argv
-    assert any(item.endswith("tools/Dockerfile.tdmelodic") for item in argv)
-    assert argv[-1] == str(Path(__file__).parents[2])
+    assert any(item.endswith("Dockerfile.tdmelodic") for item in argv)
+    assert payload["context_exists"] is True
+    assert "Dockerfile.tdmelodic" in payload["files"]
+    assert "unidic-mecab_kana-accent-2.1.2_src.zip" in payload["files"]
+    assert not Path(payload["context"]).exists()
 
 
 def test_tdmelodic_wrapper_rejects_empty_or_mutable_commit(tmp_path: Path) -> None:
@@ -282,6 +307,37 @@ def test_tdmelodic_wrapper_rejects_empty_or_mutable_commit(tmp_path: Path) -> No
         assert result.returncode != 0
 
 
+@pytest.mark.parametrize("mode", ["missing_archive", "missing_hash", "wrong_hash", "symlink_archive"])
+def test_tdmelodic_wrapper_rejects_unidic_archive_preconditions(
+    tmp_path: Path, mode: str
+) -> None:
+    wrapper = Path(__file__).parents[2] / "tools" / "build_tdmelodic_image.sh"
+    archive = tmp_path / "unidic.zip"
+    archive.write_bytes(b"fake-unidic-archive")
+    archive_value = archive
+    if mode == "symlink_archive":
+        link = tmp_path / "unidic-link.zip"
+        link.symlink_to(archive)
+        archive_value = link
+    env = {
+        **os.environ,
+        "TDMELODIC_COMMIT": "0123456789abcdef" * 2 + "01234567",
+        "TDMELODIC_UNIDIC_ARCHIVE": str(archive_value),
+        "TDMELODIC_UNIDIC_SHA256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+        "DOCKER_BIN": str(tmp_path / "docker-that-must-not-run"),
+    }
+    if mode == "missing_archive":
+        env["TDMELODIC_UNIDIC_ARCHIVE"] = str(tmp_path / "missing.zip")
+    elif mode == "missing_hash":
+        env["TDMELODIC_UNIDIC_SHA256"] = ""
+    elif mode == "wrong_hash":
+        env["TDMELODIC_UNIDIC_SHA256"] = "0" * 64
+
+    result = subprocess.run([str(wrapper)], check=False, capture_output=True, text=True, env=env)
+
+    assert result.returncode != 0
+
+
 def test_tdmelodic_dockerfile_checks_upstream_and_immutable_commit() -> None:
     dockerfile = (Path(__file__).parents[2] / "tools" / "Dockerfile.tdmelodic").read_text(
         encoding="utf-8"
@@ -290,6 +346,12 @@ def test_tdmelodic_dockerfile_checks_upstream_and_immutable_commit() -> None:
     assert "ARG TDMELODIC_COMMIT" in dockerfile
     assert "git clone" in dockerfile
     assert "git checkout --detach" in dockerfile
+    assert "mecab-config" in dockerfile
+    assert "unidic-mecab_kana-accent-2.1.2_src.zip" in dockerfile
+    assert "build-essential" in dockerfile
+    assert "configure" in dockerfile
+    assert "make install" in dockerfile
+    assert 'ENTRYPOINT ["tdmelodic-sy2a"]' in dockerfile
 
 
 def test_valid_setup_has_individual_passes_and_json_contract(tmp_path: Path, monkeypatch) -> None:

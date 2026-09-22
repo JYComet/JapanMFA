@@ -3,12 +3,28 @@ FROM python:3.11-slim
 ARG TDMELODIC_REPOSITORY
 ARG TDMELODIC_COMMIT
 
+COPY unidic-mecab_kana-accent-2.1.2_src.zip /tmp/unidic-mecab_kana-accent-2.1.2_src.zip
+
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes git ca-certificates \
+    && apt-get install --no-install-recommends --yes \
+        build-essential gcc g++ cmake unzip xz-utils \
+        libblas3 libblas-dev mecab libmecab-dev swig locales nkf \
+        python3-dev python3-pip python3-setuptools tk git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+RUN set -eux \
+    && mkdir -p /tmp/unidic-src \
+    && unzip /tmp/unidic-mecab_kana-accent-2.1.2_src.zip -d /tmp/unidic-src \
+    && configure_path="$(find /tmp/unidic-src -mindepth 1 -maxdepth 3 -type f -name configure -print -quit)" \
+    && test -n "${configure_path}" \
+    && cd "$(dirname "${configure_path}")" \
+    && ./configure \
+    && make -j"$(nproc)" \
+    && make install \
+    && mecab-config --dicdir
 
 RUN test -n "${TDMELODIC_REPOSITORY}" \
     && test -n "${TDMELODIC_COMMIT}" \
@@ -19,4 +35,4 @@ RUN test -n "${TDMELODIC_REPOSITORY}" \
     && pip install --no-cache-dir .
 
 WORKDIR /opt/tdmelodic
-ENTRYPOINT ["tdmelodic"]
+ENTRYPOINT ["tdmelodic-sy2a"]

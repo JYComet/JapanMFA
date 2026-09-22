@@ -32,7 +32,26 @@ _MFA_PRODUCT_VERSION_RE = re.compile(
 _DEFAULT_TIMEOUT = 8.0
 _PROBE_SURFACE = "日本語"
 _PROBE_YOMI = "ニホンゴ"
-_SENSITIVE_WORDS = ("token", "secret", "password", "api_key", "apikey", "authorization")
+_SENSITIVE_MARKER_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:access[_-]?key|access[_-]?token|api[_-]?key|"
+    r"authorization|credential|private[_-]?key|password|secret|token|auth)"
+    r"(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
+_SENSITIVE_ENV_MARKERS = frozenset(
+    {
+        "accesskey",
+        "accesstoken",
+        "apikey",
+        "authorization",
+        "auth",
+        "credential",
+        "password",
+        "privatekey",
+        "secret",
+        "token",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -84,7 +103,7 @@ def _display_command(command: Sequence[str] | None) -> tuple[str, ...] | None:
             result.append("<redacted>")
             redact_next = False
             continue
-        if any(word in lowered for word in _SENSITIVE_WORDS):
+        if _has_sensitive_marker(text):
             if "=" in text:
                 result.append(text.split("=", 1)[0] + "=<redacted>")
             elif text.startswith("-"):
@@ -102,14 +121,33 @@ def _redact_text(value: str) -> str:
 
     for key, secret in os.environ.items():
         normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
-        if secret and any(word.replace("_", "") in normalized for word in _SENSITIVE_WORDS):
+        if not secret or not any(marker in normalized for marker in _SENSITIVE_ENV_MARKERS):
+            continue
+        if len(secret) <= 2:
+            value = re.sub(
+                rf"(?<![A-Za-z0-9]){re.escape(secret)}(?![A-Za-z0-9])",
+                "[REDACTED]",
+                value,
+            )
+        else:
             value = value.replace(secret, "[REDACTED]")
-    lowered = value.casefold()
-    if any(word in lowered for word in _SENSITIVE_WORDS) and not value.lstrip().startswith("-"):
-        return "[REDACTED]"
-    if "=" in value and any(word in lowered for word in _SENSITIVE_WORDS):
-        return value.split("=", 1)[0] + "=<redacted>"
-    return value
+    if value.lstrip().startswith("-") and _has_sensitive_marker(value):
+        if "=" in value:
+            return value.split("=", 1)[0] + "=<redacted>"
+        return value
+    pieces = re.split(r"(\s+)", value)
+    for index, piece in enumerate(pieces):
+        if not piece or piece.isspace() or not _has_sensitive_marker(piece):
+            continue
+        if "=" in piece:
+            pieces[index] = piece.split("=", 1)[0] + "=<redacted>"
+        else:
+            pieces[index] = "[REDACTED]"
+    return "".join(pieces)
+
+
+def _has_sensitive_marker(value: str) -> bool:
+    return _SENSITIVE_MARKER_RE.search(value) is not None
 
 
 def _check(

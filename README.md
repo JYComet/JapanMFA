@@ -48,8 +48,21 @@ TDMELODIC_COMMIT=<40-character-tdmelodic-sha> \
 ```
 
 The resulting tag defaults to the first 12 characters of that SHA. The wrapper
-passes the project root as the Docker build context and does not alter Conda,
-the old JapMFA repository, or the read-only corpus.
+requires a manually obtained official `unidic-mecab_kana-accent-2.1.2_src.zip`
+archive and its expected SHA256:
+
+```bash
+export TDMELODIC_UNIDIC_ARCHIVE=/project-owned/downloads/unidic-mecab_kana-accent-2.1.2_src.zip
+export TDMELODIC_UNIDIC_SHA256=<sha256-from-the-official-archive-release>
+TDMELODIC_COMMIT=<40-character-tdmelodic-sha> tools/build_tdmelodic_image.sh
+```
+
+Obtain that archive once from the tdmelodic upstream distribution/release
+source and record the publisher's checksum; the wrapper never downloads it.
+It verifies a regular, non-symlink file, stages only the Dockerfile and archive
+under a temporary context, invokes Docker, and removes that context on exit.
+The build does not alter Conda, the old JapMFA repository, or the read-only
+corpus.
 
 ## Check and run
 
