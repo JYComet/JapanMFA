@@ -22,6 +22,7 @@ class MfaRunner:
         command: Sequence[str] = ("mfa",),
         model: str = "japanese_mfa",
         *,
+        owned_root: Path,
         timeout: float | None = None,
         env: Mapping[str, str] | None = None,
     ) -> None:
@@ -33,6 +34,7 @@ class MfaRunner:
             raise ValueError("model must be a non-empty string")
         if timeout is not None and timeout <= 0:
             raise ValueError("timeout must be positive")
+        self._owned_root = self._validate_owned_root(owned_root)
         self._command = tuple(command)
         self._model = model
         self._timeout = timeout
@@ -84,7 +86,8 @@ class MfaRunner:
         corpus_dir = Path(corpus_dir)
         dictionary = Path(dictionary)
         output_dir = Path(output_dir)
-        work_dir = self._prepare_work_dir(work_dir, corpus_dir, output_dir)
+        self._validate_paths(corpus_dir, work_dir, output_dir)
+        work_dir = self._create_work_dir(work_dir)
         self._run(
             self._build_validate_command(corpus_dir, dictionary, work_dir),
             work_dir,
@@ -125,40 +128,91 @@ class MfaRunner:
             )
         return textgrids[0]
 
+    @staticmethod
+    def _validate_owned_root(owned_root: Path) -> Path:
+        path = Path(owned_root)
+        if not path.is_absolute():
+            raise _failure(
+                "path_ownership_invalid",
+                "MFA owned_root must be an absolute path",
+                owned_root=str(path),
+            )
+        resolved = path.resolve()
+        protected = {
+            Path("/").resolve(),
+            Path.home().resolve(),
+            Path.home().resolve().parent,
+            Path("/tmp").resolve(),
+            Path("/var").resolve(),
+            Path("/usr").resolve(),
+            Path("/opt").resolve(),
+            Path("/workspace").resolve(),
+            Path("/workspaces").resolve(),
+            Path(__file__).resolve().parents[3],
+            Path.cwd().resolve(),
+        }
+        if resolved in protected:
+            raise _failure(
+                "path_ownership_invalid",
+                "MFA owned_root is a protected broad path",
+                owned_root=str(path),
+            )
+        return resolved
+
+    @staticmethod
+    def _overlaps(first: Path, second: Path) -> bool:
+        return first == second or first in second.parents or second in first.parents
+
+    def _validate_paths(
+        self, corpus_dir: Path, work_dir: Path, output_dir: Path | None = None
+    ) -> tuple[Path, Path, Path | None]:
+        owned_root = self._owned_root
+        corpus = Path(corpus_dir).resolve()
+        work = Path(work_dir).resolve()
+        output = None if output_dir is None else Path(output_dir).resolve()
+
+        def strict_descendant(path: Path) -> bool:
+            return path != owned_root and owned_root in path.parents
+
+        if not strict_descendant(work):
+            raise _failure(
+                "path_ownership_invalid",
+                "MFA work_dir must be a strict descendant of owned_root",
+                owned_root=str(owned_root),
+                work_dir=str(work),
+            )
+        if output is not None and not strict_descendant(output):
+            raise _failure(
+                "path_ownership_invalid",
+                "MFA output_dir must be a strict descendant of owned_root",
+                owned_root=str(owned_root),
+                output_dir=str(output),
+            )
+        if output is not None and self._overlaps(work, output):
+            raise _failure(
+                "path_ownership_invalid",
+                "MFA work_dir and output_dir must not overlap",
+                work_dir=str(work),
+                output_dir=str(output),
+            )
+        if self._overlaps(work, corpus) or (output is not None and self._overlaps(output, corpus)):
+            raise _failure(
+                "path_ownership_invalid",
+                "MFA work/output paths must not overlap corpus_dir",
+                corpus_dir=str(corpus),
+                work_dir=str(work),
+                output_dir=None if output is None else str(output),
+            )
+        return corpus, work, output
+
     def _prepare_work_dir(
         self, work_dir: Path, corpus_dir: Path, output_dir: Path | None = None
     ) -> Path:
-        work_dir = Path(work_dir)
-        if not work_dir.is_absolute():
-            raise _failure(
-                "work_directory_invalid",
-                "MFA work directory must be an absolute generated path",
-                work_dir=str(work_dir),
-            )
-        resolved = work_dir.resolve()
-        forbidden = {
-            Path("/").resolve(),
-            Path.home().resolve(),
-            Path.cwd().resolve(),
-            Path(__file__).resolve().parents[3],
-            Path(corpus_dir).resolve(),
-        }
-        if output_dir is not None:
-            forbidden.add(Path(output_dir).resolve())
-        corpus_resolved = Path(corpus_dir).resolve()
-        is_parent_of_corpus = corpus_resolved != resolved and resolved in corpus_resolved.parents
-        output_resolved = Path(output_dir).resolve() if output_dir is not None else None
-        is_parent_of_output = (
-            output_resolved is not None
-            and output_resolved != resolved
-            and resolved in output_resolved.parents
-        )
-        if resolved in forbidden or is_parent_of_corpus or is_parent_of_output:
-            raise _failure(
-                "work_directory_invalid",
-                "MFA work directory must be utterance-owned and distinct from inputs",
-                work_dir=str(work_dir),
-            )
+        _corpus, work, _output = self._validate_paths(corpus_dir, work_dir, output_dir)
+        return self._create_work_dir(work)
+
+    @staticmethod
+    def _create_work_dir(work_dir: Path) -> Path:
         try:
             if work_dir.exists() and not work_dir.is_dir():
                 raise OSError("path is not a directory")
@@ -186,14 +240,16 @@ class MfaRunner:
                 env=self._env,
             )
         except subprocess.TimeoutExpired as exc:
-            stdout = exc.stdout or ""
-            stderr = exc.stderr or ""
+            stdout = self._decode_stream(exc.stdout)
+            stderr = self._decode_stream(exc.stderr)
             self._write_logs(stdout_log, stderr_log, stdout, stderr)
             raise _failure(
                 "command_timeout",
                 f"MFA {name} command timed out",
                 command=command,
                 timeout=self._timeout,
+                stdout=stdout[-4000:],
+                stderr=stderr[-4000:],
                 stdout_log=str(stdout_log),
                 stderr_log=str(stderr_log),
             ) from exc
@@ -219,6 +275,16 @@ class MfaRunner:
                 stdout_log=str(stdout_log),
                 stderr_log=str(stderr_log),
             )
+
+    @staticmethod
+    def _decode_stream(value: object) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        if isinstance(value, str):
+            return value
+        return str(value)
 
     @staticmethod
     def _write_logs(stdout_log: Path, stderr_log: Path, stdout: str, stderr: str) -> None:
