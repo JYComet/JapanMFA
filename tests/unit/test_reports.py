@@ -24,6 +24,28 @@ def test_write_json_is_unicode_sorted_atomic_and_secret_safe(tmp_path: Path, mon
     assert json.loads(raw)["a"] == 1
 
 
+def test_write_json_redacts_sensitive_env_values_and_embedded_occurrences(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HF_TOKEN", "hf-x")
+    monkeypatch.setenv("ACCESS_KEY", "ak")
+    path = tmp_path / "secrets.json"
+
+    write_json(
+        path,
+        {
+            "token": "hf-x",
+            "nested": {"ACCESS_KEY": "ak", "message": "prefix hf-x and ak suffix"},
+            "safe": "ordinary",
+        },
+    )
+
+    raw = path.read_text(encoding="utf-8")
+    assert "hf-x" not in raw
+    assert "ak" not in raw
+    assert "prefix [REDACTED] and [REDACTED] suffix" in raw
+
+
 def test_manifest_and_summary_group_outcomes_stably(tmp_path: Path) -> None:
     manifest = tmp_path / "manifest.jsonl"
     outcomes = (

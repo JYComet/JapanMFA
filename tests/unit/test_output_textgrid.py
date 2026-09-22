@@ -43,3 +43,34 @@ def test_writes_validated_five_tier_textgrid_with_shared_phone_boundaries(
         for block in lower
     ]
     assert boundaries[0] == boundaries[1] == boundaries[2]
+
+
+def test_textgrid_round_trips_quotes_with_praat_doubled_quote_syntax(tmp_path: Path) -> None:
+    path = tmp_path / "quoted.TextGrid"
+    annotation = PhoneAnnotation(
+        PhoneInterval(0.0, 1.0, 'p"q'),
+        0,
+        (Mora(0, 0, 'カ"', "H"),),
+        'カ"',
+        "H",
+        False,
+    )
+
+    write_five_tier_textgrid(path, 1.0, '原"文', 'カ"ナ', (annotation,))
+    validate_five_tier_textgrid(path, 1.0, frozenset())
+
+    text = path.read_text(encoding="utf-8")
+    assert 'text = "原""文"' in text
+    assert 'text = "p""q"' in text
+    assert '\\"' not in text
+
+
+def test_textgrid_rejects_wrong_declared_tier_size(tmp_path: Path) -> None:
+    path = tmp_path / "wrong-size.TextGrid"
+    write_five_tier_textgrid(path, 1.0, "原", "カ", _annotations()[:1])
+    path.write_text(path.read_text(encoding="utf-8").replace("size = 5", "size = 4", 1), encoding="utf-8")
+
+    import pytest
+
+    with pytest.raises(ValueError, match="declared tier size"):
+        validate_five_tier_textgrid(path, 1.0, frozenset())

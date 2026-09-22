@@ -24,31 +24,72 @@ except ImportError:  # pragma: no cover - this project runs on POSIX
 
 
 _RUN_ID = os.environ.get("JAPANMFA_RUN_ID") or uuid.uuid4().hex
-_SECRET_KEY = re.compile(r"(?:api[_-]?(?:key|token)|access[_-]?token|secret|password|credential|authorization|private[_-]?key)", re.IGNORECASE)
+_SENSITIVE_COMPOUNDS = frozenset(
+    {
+        "apikey",
+        "accesskey",
+        "accesstoken",
+        "authorization",
+        "credential",
+        "hfkey",
+        "hftoken",
+        "password",
+        "privatekey",
+        "secret",
+        "token",
+        "auth",
+    }
+)
 _STATUSES = ("aligned", "skipped", "failed")
+
+
+def _sensitive_key(key: str) -> bool:
+    normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
+    if normalized in _SENSITIVE_COMPOUNDS:
+        return True
+    return any(
+        normalized.endswith(suffix)
+        for suffix in (
+            "token",
+            "secret",
+            "password",
+            "credential",
+            "authorization",
+            "auth",
+            "apikey",
+            "accesskey",
+            "privatekey",
+        )
+    )
 
 
 def _secret_values() -> frozenset[str]:
     return frozenset(
         value
         for key, value in os.environ.items()
-        if _SECRET_KEY.search(key) and value and len(value) >= 8
+        if _sensitive_key(key) and value
     )
 
 
+def _redact_string(value: str) -> str:
+    for secret in sorted(_secret_values(), key=len, reverse=True):
+        value = value.replace(secret, "[REDACTED]")
+    return value
+
+
 def _safe(value: Any, *, key: str | None = None) -> Any:
-    if key and _SECRET_KEY.search(key):
+    if key and _sensitive_key(key):
         return "[REDACTED]"
     if isinstance(value, Path):
-        return str(value)
+        return _redact_string(str(value))
     if isinstance(value, Mapping):
         return {str(name): _safe(item, key=str(name)) for name, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_safe(item) for item in value]
     if isinstance(value, set | frozenset):
         return [_safe(item) for item in sorted(value, key=str)]
-    if isinstance(value, str) and value in _secret_values():
-        return "[REDACTED]"
+    if isinstance(value, str):
+        return _redact_string(value)
     return value
 
 

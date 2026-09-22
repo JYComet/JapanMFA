@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import ast
-import json
 import math
 import os
 import re
@@ -44,13 +42,21 @@ def _error(message: str) -> ValueError:
 
 
 def _quoted(raw: str, field: str) -> str:
-    try:
-        value = ast.literal_eval(raw)
-    except (SyntaxError, ValueError) as exc:
-        raise _error(f"{field} is not a quoted string") from exc
-    if not isinstance(value, str):
-        raise _error(f"{field} is not a string")
-    return value
+    if len(raw) < 2 or raw[0] != '"' or raw[-1] != '"':
+        raise _error(f"{field} is not a quoted string")
+    value: list[str] = []
+    index = 1
+    while index < len(raw) - 1:
+        character = raw[index]
+        if character == '"':
+            if index + 1 >= len(raw) - 1 or raw[index + 1] != '"':
+                raise _error(f"{field} contains an unescaped quote")
+            value.append('"')
+            index += 2
+        else:
+            value.append(character)
+            index += 1
+    return "".join(value)
 
 
 def _number(raw: str, field: str) -> float:
@@ -90,6 +96,15 @@ def _parse(path: Path) -> tuple[float, float, tuple[_ParsedTier, ...]]:
         raise _error("header requires xmin and xmax")
     header_start = _number(header_fields["xmin"], "header xmin")
     header_end = _number(header_fields["xmax"], "header xmax")
+    declared_sizes = [
+        int(match.group(1))
+        for line in header
+        if (match := re.match(r"^\s*size\s*=\s*(\d+)\s*$", line))
+    ]
+    if len(declared_sizes) != 1:
+        raise _error("header requires exactly one tier size")
+    if declared_sizes[0] != 5 or declared_sizes[0] != len(item_starts):
+        raise _error("declared tier size does not equal five parsed tiers")
 
     tiers: list[_ParsedTier] = []
     for item_number, start in enumerate(item_starts):
@@ -202,7 +217,9 @@ def _float_text(value: float) -> str:
 
 
 def _text(value: str) -> str:
-    return json.dumps(value, ensure_ascii=False)
+    if not isinstance(value, str):
+        raise TypeError("TextGrid labels must be strings")
+    return '"' + value.replace('"', '""') + '"'
 
 
 def _tier_text(name: str, duration_text: str, intervals: Sequence[tuple[str, str, str]]) -> list[str]:
