@@ -49,6 +49,15 @@ def test_zero_duration_non_silence_phone_is_a_typed_parse_failure(tmp_path: Path
     )
 
 
+def test_positive_blank_phone_intervals_survive_for_praat_boundaries(tmp_path: Path) -> None:
+    path = tmp_path / "blanks.TextGrid"
+    path.write_text(_textgrid(phone_rows=[(0.0, .2, ""), (.2, .5, "a"), (.5, .8, ""), (.8, 1.0, "a"), (1.0, 2.0, "")]), encoding="utf-8")
+    alignment = parse_mfa_textgrid(path, frozenset({"sil"}))
+    assert [(p.start, p.end, p.label, p.is_silence) for p in alignment.phones] == [
+        (0.0, .2, "", True), (.2, .5, "a", False), (.5, .8, "", True), (.8, 1.0, "a", False), (1.0, 2.0, "", True),
+    ]
+
+
 def test_overlapping_phone_intervals_fail_without_shifting_boundaries(tmp_path: Path) -> None:
     path = tmp_path / "overlap.TextGrid"
     path.write_text(_textgrid(phone_rows=[(0.0, 0.6, "a"), (0.5, 1.0, "k")]), encoding="utf-8")

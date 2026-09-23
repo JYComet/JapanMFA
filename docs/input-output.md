@@ -25,13 +25,25 @@ skipped. Audio normalization uses a project-owned working copy.
 |---|---|---|
 | `original` | one complete-utterance interval | original text exactly as supplied |
 | `kana` | one complete-utterance interval | full locked katakana, with display gaps preserved |
-| `phones` | MFA output intervals | MFA phone labels, including silence |
+| `phones` | MFA intervals plus audited outer-edge refinement and explicit silence | MFA phone labels, including silence |
 | `phone_kana` | byte-for-byte same boundaries as `phones` | mora/kana contribution, possibly `オ|ー` |
-| `phone_tone` | byte-for-byte same boundaries as `phones` | `H`, `L`, or ordered composite such as `H|L` |
+| `phone_tone` | byte-for-byte same boundaries as `phones` | exactly `HH`, `LL`, `HL`, or `LH`; blank for silence |
 
 The original and kana tiers are deliberately not split by token or phone. Only
 the phone and its two auxiliary tiers follow MFA boundaries. Silence labels
 have empty auxiliary labels; every non-silence phone must have both labels.
+All three lower tiers partition the entire file, including positive-duration
+blank MFA intervals and uncovered leading, internal, and trailing gaps.
+`alignment.json` stores that same partition plus the full per-phone mora trace.
+
+`postprocess.json` stores the raw and final phone intervals, sample-rounding
+corrections, energy thresholds, bounded outer-edge edits, and acoustic coverage
+checks. A failed check is a failed utterance with diagnostics but no final
+TextGrid, `alignment.json`, or completion marker. A single recovery attempt can
+split occurrence aliases into lossless mora groups and rerun MFA on a cropped
+working copy; the original phone order and source-time offset are verified.
+`recovery.accepted` identifies a selected recovery, and
+`recovery.requires_manual_review` flags its residual uncertainty.
 
 Per-utterance JSON stores source text, ASR result, tokens, overrides, morae,
 tdmelodic output, G2P/alias data, MFA diagnostics, projections, and the final
@@ -53,7 +65,8 @@ comparison is marked `performed: false` with reason `no_authoritative_text`.
 
 ## Status and recovery
 
-- `aligned`: all five tiers and required JSON artifacts validate;
+- `aligned`: all five tiers, acoustic checks, and required JSON artifacts validate
+  (not an assertion of human-verified phone accuracy);
 - `skipped`: known unsupported input, normally `unsupported_japanese_text`;
 - `failed`: supported input hit a typed stage or consistency failure.
 

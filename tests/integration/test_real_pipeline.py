@@ -123,7 +123,7 @@ def _write_aligned_fixture(
                 token_index=0,
                 morae=(),
                 kana_label="ゲ",
-                tone_label="L",
+                tone_label="LL",
                 is_silence=False,
             ),
         ),

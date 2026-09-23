@@ -13,13 +13,15 @@ cannot affect a following mora.
 The mora sequence is then paired with the single MFA-G2P phone sequence selected
 for that token occurrence. MFA alignment is run against safe per-occurrence
 ASCII aliases and a locked dictionary, so repeated surface forms cannot select
-another pronunciation. MFA v3 supplies the final boundaries.
+another pronunciation. MFA v3 supplies the phonetic boundaries; a separately
+audited acoustic postprocessor may refine only the outer speech edges.
 
 For each MFA phone:
 
-- one contributing mora broadcasts its kana and tone;
+- one contributing mora broadcasts its kana and a constant contour (`H → HH`, `L → LL`);
 - multiple phones from one mora repeat that mora's labels;
-- a phone spanning multiple morae uses ordered labels, e.g. `オ|ー` and `H|L`;
+- a phone spanning multiple morae uses ordered kana labels, e.g. `オ|ー`,
+  and the contour `HL` for an H mora followed by an L mora;
 - when a phone-map rule has the same number of morae and phones, ranges are
   paired one-to-one in order (for example, `オ,ー -> o,o` maps to `オ` then
   `ー`, preserving `H` then `L`);
@@ -29,11 +31,21 @@ For each MFA phone:
 - silence has empty `phone_kana` and `phone_tone` labels;
 - no internal boundary is fabricated inside a single MFA interval.
 
-The H/L long-phone rule is exact: when a long phone covers differently toned
-morae, `phone_tone` contains the ordered composite joined by `|` (for example,
-`H|L`), preserving mora order. A repeated same tone may remain a single label.
+`phone_tone` uses exactly `HH`, `LL`, `HL`, or `LH` on speech phones. These are
+pitch-state contours, not a statement that every phone has two morae. For
+longer spans, HHH becomes HH, HHL becomes HL, and LHH becomes LH. More than one
+change (HLH or LHL) cannot be represented faithfully by these four labels and
+fails with `unsupported_tone_contour`. Complete ordered mora labels remain in
+`alignment.json` and `postprocess.json`; no neighboring phone's tone is borrowed.
 The original and kana tiers remain whole utterances; only the three lower tiers
-share MFA boundaries.
+share the same complete time partition, including explicit blank intervals.
+
+These labels project tdmelodic's predicted lexical accent. They are not
+measured audio F0: consonants can inherit mora accent even when unvoiced, and
+expressive speech or laughter can differ from the predicted lexical pattern.
+Pitch changes generally preserve the segmental phone identity, but can change
+the accent and distinguish words in Japanese. Vowel length is a separate
+phonological distinction from pitch.
 
 Malformed brackets, reading mismatch, mora-count mismatch, unknown MFA phones,
 or word/phone order mismatch fail closed with a reason code. They never trigger

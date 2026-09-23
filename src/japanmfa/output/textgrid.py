@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from japanmfa.domain import PhoneAnnotation
+from japanmfa.domain import PhoneAnnotation, PhoneInterval
 
 
 _ITEM_RE = re.compile(r"^\s{4}item\s+\[\d+\]:\s*$")
@@ -195,6 +195,8 @@ def _parse(path: Path) -> tuple[float, float, tuple[_ParsedTier, ...]]:
 
 
 def _validate_intervals(intervals: Sequence[_ParsedInterval], duration: float, tier: str) -> None:
+    if not intervals or intervals[0].start != 0.0 or intervals[-1].end != duration:
+        raise _error(f"{tier} must partition the complete duration")
     previous_start: float | None = None
     previous_end: float | None = None
     for interval in intervals:
@@ -204,6 +206,8 @@ def _validate_intervals(intervals: Sequence[_ParsedInterval], duration: float, t
             raise _error(f"{tier} intervals are not monotonic")
         if previous_end is not None and interval.start < previous_end:
             raise _error(f"{tier} intervals overlap")
+        if previous_end is not None and interval.start != previous_end:
+            raise _error(f"{tier} intervals contain an uncovered gap")
         previous_start, previous_end = interval.start, interval.end
 
 
@@ -246,11 +250,13 @@ def validate_five_tier_textgrid(
             phone.end_raw,
         ) != (tone_interval.start_raw, tone_interval.end_raw):
             raise _error(f"phone-level boundaries differ at interval {index + 1}")
-        if phone.label in silence_labels:
+        if not phone.label or phone.label in silence_labels:
             if kana_interval.label or tone_interval.label:
                 raise _error(f"silence labels are not empty at interval {index + 1}")
         elif not phone.label or not kana_interval.label or not tone_interval.label:
             raise _error(f"non-silence labels are incomplete at interval {index + 1}")
+        elif tone_interval.label not in {"HH", "LL", "HL", "LH"}:
+            raise _error(f"non-silence tone must be HH, LL, HL or LH at interval {index + 1}")
 
 
 def _float_text(value: float) -> str:
@@ -303,6 +309,30 @@ def _render(duration: float, tiers: Sequence[tuple[str, Sequence[tuple[str, str,
     return "\n".join(lines) + "\n"
 
 
+def complete_phone_partition(
+    duration: float, annotations: Sequence[PhoneAnnotation]
+) -> tuple[PhoneAnnotation, ...]:
+    """Fill uncovered time with explicit silence without moving phone edges."""
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError("duration must be finite and greater than zero")
+    result: list[PhoneAnnotation] = []
+    cursor = 0.0
+    for annotation in annotations:
+        if not isinstance(annotation, PhoneAnnotation):
+            raise TypeError("annotations must contain PhoneAnnotation values")
+        interval = annotation.interval
+        if not (math.isfinite(interval.start) and math.isfinite(interval.end)
+                and cursor <= interval.start < interval.end <= duration):
+            raise ValueError("annotation intervals overlap or are outside duration")
+        if interval.start > cursor:
+            result.append(PhoneAnnotation(PhoneInterval(cursor, interval.start, ""), None, (), "", "", True))
+        result.append(annotation)
+        cursor = interval.end
+    if cursor < duration:
+        result.append(PhoneAnnotation(PhoneInterval(cursor, duration, ""), None, (), "", "", True))
+    return tuple(result)
+
+
 def write_five_tier_textgrid(
     path: Path,
     duration: float,
@@ -322,7 +352,7 @@ def write_five_tier_textgrid(
     phone_rows: list[tuple[str, str, str, str, str]] = []
     silence_labels: set[str] = set()
     previous_end: float | None = None
-    for annotation in annotations:
+    for annotation in complete_phone_partition(duration, annotations):
         if not isinstance(annotation, PhoneAnnotation):
             raise TypeError("annotations must contain PhoneAnnotation values")
         interval = annotation.interval
@@ -341,6 +371,8 @@ def write_five_tier_textgrid(
             if not interval.label or not annotation.kana_label or not annotation.tone_label:
                 raise ValueError("non-silence annotations require non-empty labels")
             phone_kana, phone_tone = annotation.kana_label, annotation.tone_label
+            if phone_tone not in {"HH", "LL", "HL", "LH"}:
+                raise ValueError("non-silence tone must be HH, LL, HL or LH")
         phone_rows.append((start_text, end_text, interval.label, phone_kana, phone_tone))
 
     # All three phone tiers are projected from this one immutable row list.
@@ -375,4 +407,4 @@ def write_five_tier_textgrid(
                 pass
 
 
-__all__ = ["validate_five_tier_textgrid", "write_five_tier_textgrid"]
+__all__ = ["complete_phone_partition", "validate_five_tier_textgrid", "write_five_tier_textgrid"]

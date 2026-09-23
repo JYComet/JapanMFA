@@ -131,3 +131,13 @@ def test_manifest_rejects_malformed_outcome(tmp_path: Path) -> None:
             tmp_path / "manifest.jsonl",
             UtteranceOutcome("u", "failed", None, "missing reason", None, {}),
         )
+
+
+def test_audit_preserves_linguistic_token_indices_without_exposing_secrets(tmp_path: Path) -> None:
+    path = tmp_path / "trace.json"
+    write_json(path, {"token_index": 0, "tokens": [{"index": 0, "surface": "あ", "reading": "ア", "api_token": "secret-value"}], "nested": {"token_index": "a-secret", "token": "another-secret"}})
+    payload = json.loads(path.read_text())
+    assert payload["token_index"] == 0
+    assert payload["tokens"][0]["reading"] == "ア"
+    assert payload["tokens"][0]["api_token"] == "[REDACTED]"
+    assert payload["nested"] == {"token_index": "[REDACTED]", "token": "[REDACTED]"}

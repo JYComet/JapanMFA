@@ -14,6 +14,8 @@ import tempfile
 import time
 import traceback
 import unicodedata
+import wave
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
@@ -46,6 +48,7 @@ from .mfa.g2p import MfaG2pClient
 from .mfa.lexicon import LockedLexicon
 from .mfa.phone_map import PhoneMap
 from .mfa.runner import MfaRunner
+from .mfa.recovery import build_recovery_units, restore_recovery_alignment
 from .mfa.textgrid import MfaAlignment, parse_mfa_textgrid
 from .output.reports import (
     _redact_string,
@@ -57,6 +60,7 @@ from .output.reports import (
 )
 from .output.textgrid import validate_five_tier_textgrid, write_five_tier_textgrid
 from .projection import project_annotations
+from .postprocess import PostprocessResult, annotation_rows, postprocess_annotations
 
 
 @dataclass(frozen=True)
@@ -82,6 +86,52 @@ def _duration(audio: AudioInfo, alignment: MfaAlignment) -> float:
     if positive_ends:
         return max(positive_ends)
     raise StageFailure("audio", "duration_unavailable", "audio duration is not positive")
+
+
+def _recover_acoustic_coverage(
+    mfa: Any, artifact_dir: Path, audio: AudioInfo, duration: float,
+    annotations: tuple[PhoneAnnotation, ...], lexicon: LockedLexicon,
+    morae: dict[int, tuple[Mora, ...]], phone_map: PhoneMap,
+    silence: frozenset[str], initial: PostprocessResult,
+) -> PostprocessResult:
+    """One MFA retry with lossless mora groups, never fabricated timings."""
+    recovery: dict[str, object] = {"attempted": True, "accepted": False,
+                                   "requires_manual_review": True,
+                                   "original_attempt": initial.report}
+    try:
+        units = build_recovery_units(annotations, lexicon)
+        if len(units) <= len(lexicon.aliases):
+            raise StageFailure("recovery", "recovery_not_applicable", "no lossless within-token split available")
+        root = _ensure_output_directory(artifact_dir, "mfa/recovery")
+        corpus = _ensure_output_directory(root, "corpus")
+        output, work = _safe_output_path(root, "aligned"), _safe_output_path(root, "work")
+        dictionary = _safe_output_path(root, "dictionary.dict")
+        wav_path, lab_path = _safe_output_path(corpus, "clip.wav"), _safe_output_path(corpus, "clip.lab")
+        with wave.open(str(audio.working_path), "rb") as source:
+            rate = source.getframerate()
+            start_frame = max(0, math.floor((float(initial.report["activity_start"]) - .03) * rate))
+            end_frame = min(source.getnframes(), math.ceil((float(initial.report["activity_end"]) + .03) * rate))
+            source.setpos(start_frame)
+            payload = source.readframes(end_frame - start_frame)
+            with wave.open(str(wav_path), "wb") as destination:
+                destination.setparams(source.getparams())
+                destination.writeframes(payload)
+        offset = start_frame / rate
+        lab_path.write_text(" ".join(u.alias for u in units) + "\n", encoding="utf-8")
+        dictionary.write_text("".join(u.alias + "\t" + " ".join(u.phones) + "\n" for u in units), encoding="utf-8")
+        grid = mfa.align(corpus, dictionary, output, work)
+        recovery.update(raw_grid=str(grid), crop_start=offset, crop_end=end_frame / rate,
+                        units=[{"alias": u.alias, "original_alias": u.original_alias, "phones": list(u.phones)} for u in units])
+        restored = restore_recovery_alignment(parse_mfa_textgrid(Path(grid), silence), units, lexicon, offset)
+        candidate = project_annotations(restored, lexicon, morae, phone_map)
+        processed = postprocess_annotations(audio.working_path, duration, candidate)
+        if processed.report["passed"]:
+            recovery["accepted"] = True
+            return PostprocessResult(processed.annotations, {**processed.report, "recovery": recovery})
+        recovery["candidate_checks"] = processed.report
+    except (StageFailure, ValueError, OSError, wave.Error) as exc:
+        recovery.update(reason_code=getattr(exc, "reason_code", "recovery_failed"), message=str(exc))
+    return PostprocessResult(initial.annotations, {**initial.report, "recovery": recovery})
 
 
 def _valid_audio_artifact(path: Path) -> bool:
@@ -211,18 +261,9 @@ def _publish_final_outputs(
             {
                 "textgrid": str(final_grid),
                 "duration": duration,
-                "phones": [
-                    {
-                        "start": item.interval.start,
-                        "end": item.interval.end,
-                        "label": item.interval.label,
-                        "kana": item.kana_label,
-                        "tone": item.tone_label,
-                        "token_index": item.token_index,
-                        "silence": item.is_silence,
-                    }
-                    for item in annotations
-                ],
+                "phones": annotation_rows(annotations),
+                "tone_encoding": "HH_LL_HL_LH",
+                "tone_source": "tdmelodic_predicted_mora_accent_not_measured_f0",
             },
         )
         if not _valid_audio_artifact(staged_grid) or not _valid_audio_artifact(staged_alignment):
@@ -785,6 +826,22 @@ class JapanMFAPipeline:
             stage_started = time.monotonic()
             annotations = project_annotations(alignment, lexicon, toned_morae, phone_map)
             durations["projection"] = time.monotonic() - stage_started
+
+            current_stage = "postprocess"
+            stage_started = time.monotonic()
+            duration = _duration(audio_info, alignment)
+            processed = postprocess_annotations(audio_info.working_path, duration, annotations)
+            if processed.report["reason_code"] == "alignment_acoustic_coverage":
+                processed = _recover_acoustic_coverage(
+                    mfa, artifact_dir, audio_info, duration, annotations, lexicon,
+                    toned_morae, phone_map, frozenset(self.config.validation.silence_labels), processed,
+                )
+            write_json(_safe_output_path(artifact_dir, "postprocess.json"), processed.report)
+            durations["postprocess"] = time.monotonic() - stage_started
+            if not processed.report["passed"]:
+                raise StageFailure("postprocess", str(processed.report["reason_code"]),
+                                   "acoustic quality checks failed; inspect postprocess.json")
+            annotations = processed.annotations
 
             current_stage = "output"
             stage_started = time.monotonic()

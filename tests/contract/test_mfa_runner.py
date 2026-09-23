@@ -62,7 +62,7 @@ def test_align_validates_first_and_uses_pinned_mfa_3_argv(tmp_path: Path, monkey
         "japanese_mfa",
         str(output),
     ]
-    assert commands[1][6:] == ["--temporary_directory", str(work), "--clean"]
+    assert commands[1][6:] == ["--temporary_directory", str(work), "--clean", "--no_tokenization"]
     assert (work / "validate.stdout.log").read_text(encoding="utf-8") == "validated\n"
     assert (work / "align.stderr.log").read_text(encoding="utf-8") == ""
 

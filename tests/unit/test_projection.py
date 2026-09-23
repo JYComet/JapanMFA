@@ -49,8 +49,8 @@ def test_projection_repeats_one_mora_label_for_multiple_cv_phones() -> None:
     annotations = project_annotations(alignment, lexicon, {0: _morae(("カ", "H"))}, PHONE_MAP)
 
     assert [(item.kana_label, item.tone_label, item.interval.start, item.interval.end) for item in annotations] == [
-        ("カ", "H", 0.0, 0.2),
-        ("カ", "H", 0.2, 0.4),
+        ("カ", "HH", 0.0, 0.2),
+        ("カ", "HH", 0.2, 0.4),
     ]
     assert all(item.morae == _morae(("カ", "H")) for item in annotations)
 
@@ -66,7 +66,7 @@ def test_projection_keeps_one_long_phone_boundary_and_composes_mora_tones() -> N
     assert len(annotations) == 1
     assert annotations[0].interval == PhoneInterval(0.25, 0.75, "oː")
     assert annotations[0].kana_label == "オ|ー"
-    assert annotations[0].tone_label == "H|L"
+    assert annotations[0].tone_label == "HL"
 
 
 def test_projection_assigns_distinct_morae_to_distinct_long_vowel_phones() -> None:
@@ -78,8 +78,8 @@ def test_projection_assigns_distinct_morae_to_distinct_long_vowel_phones() -> No
     )
 
     assert [(item.kana_label, item.tone_label) for item in annotations] == [
-        ("オ", "H"),
-        ("ー", "L"),
+        ("オ", "HH"),
+        ("ー", "LL"),
     ]
     assert [tuple((mora.kana, mora.tone) for mora in item.morae) for item in annotations] == [
         (("オ", "H"),),
@@ -98,7 +98,7 @@ def test_projection_supports_palatalized_mora_n_and_sokuon() -> None:
         alignment = _alignment(tuple((phone, index * 0.1, (index + 1) * 0.1, False) for index, phone in enumerate(phones)))
         annotations = project_annotations(alignment, lexicon, {0: _morae((kana[0], "L"))}, PHONE_MAP)
         assert [item.kana_label for item in annotations] == [kana[0]] * len(phones)
-        assert [item.tone_label for item in annotations] == ["L"] * len(phones)
+        assert [item.tone_label for item in annotations] == ["LL"] * len(phones)
 
 
 def test_projection_reconciles_palatalized_word_with_following_vowel() -> None:
@@ -115,7 +115,7 @@ def test_projection_reconciles_palatalized_word_with_following_vowel() -> None:
     )
 
     assert [item.kana_label for item in annotations] == ["キョ", "キョ", "ウ"]
-    assert [item.tone_label for item in annotations] == ["H", "H", "L"]
+    assert [item.tone_label for item in annotations] == ["HH", "HH", "LL"]
 
 
 def test_projection_reconciles_explicit_devoiced_vowel_spelling() -> None:
@@ -127,7 +127,7 @@ def test_projection_reconciles_explicit_devoiced_vowel_spelling() -> None:
     )
 
     assert [item.kana_label for item in annotations] == ["ス", "ス"]
-    assert [item.tone_label for item in annotations] == ["L", "L"]
+    assert [item.tone_label for item in annotations] == ["LL", "LL"]
 
 
 def test_projection_emits_silence_with_blank_labels_and_no_token() -> None:
@@ -224,3 +224,15 @@ def test_labels_for_phone_rejects_unlabeled_mora() -> None:
     with pytest.raises(StageFailure) as exc_info:
         labels_for_phone((Mora(0, 0, "ア", None),))
     assert exc_info.value.reason_code == "unlabeled_phone"
+
+
+@pytest.mark.parametrize("tones,expected", [("H", "HH"), ("L", "LL"), ("HH", "HH"), ("LL", "LL"), ("HL", "HL"), ("LH", "LH"), ("HHL", "HL"), ("LHH", "LH")])
+def test_phone_contour_preserves_its_own_ordered_mora_tones(tones: str, expected: str) -> None:
+    morae = tuple(Mora(0, i, "オ" if i == 0 else "ー", t) for i, t in enumerate(tones))
+    assert labels_for_phone(morae)[1] == expected
+
+
+def test_phone_contour_does_not_hide_internal_pitch_reversal() -> None:
+    with pytest.raises(StageFailure) as error:
+        labels_for_phone(_morae(("オ", "H"), ("ー", "L"), ("ー", "H")))
+    assert error.value.reason_code == "unsupported_tone_contour"

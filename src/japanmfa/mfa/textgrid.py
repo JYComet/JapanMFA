@@ -298,8 +298,8 @@ def parse_mfa_textgrid(
 
     phones: list[MfaPhone] = []
     for interval in phone_tier.intervals:
-        is_silence = interval.label in silence
-        if _raw_is_diagnostic(interval):
+        is_silence = not interval.label or interval.label in silence
+        if interval.end == interval.start:
             if interval.end == interval.start and interval.label and not is_silence:
                 raise _failure(
                     "zero_duration_phone",

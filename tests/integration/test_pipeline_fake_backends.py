@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import array
+import math
+import wave
 from pathlib import Path
 
 import pytest
@@ -189,7 +192,10 @@ def _pipeline(*, accent: object | None = None, g2p: object | None = None, mfa: o
 def _write_audio(root: Path, name: str, text: str | None = "今日は晴れ") -> None:
     root.mkdir(parents=True, exist_ok=True)
     path = root / f"{name}.wav"
-    path.write_bytes(b"RIFF-fake")
+    samples = array.array("h", (int(8000 * math.sin(2 * math.pi * 200 * i / 16000)) for i in range(16000)))
+    with wave.open(str(path), "wb") as audio:
+        audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+        audio.writeframes(samples.tobytes())
     if text is not None:
         path.with_suffix(".txt").write_text(text, encoding="utf-8")
 
@@ -205,6 +211,75 @@ def test_fake_backends_write_valid_five_tier_and_reports(tmp_path: Path) -> None
     assert (artifact / "ok.TextGrid").is_file()
     assert all((artifact / name).is_file() for name in ("alignment.json", "frontend.json", "asr.json", "mfa.json"))
     assert '"status": "aligned"' in (tmp_path / "output" / "manifest.jsonl").read_text()
+
+
+def test_acoustic_coverage_failure_keeps_diagnostics_but_no_published_final(tmp_path: Path) -> None:
+    class LateMfa(FakeMfa):
+        def align(self, *args: object) -> Path:
+            path = super().align(*args)
+            grid = path.read_text().replace('xmin = 0\n            xmax = 0.3', 'xmin = 0.7\n            xmax = 0.8').replace('xmin = 0.3\n            xmax = 0.6', 'xmin = 0.8\n            xmax = 0.9').replace('xmin = 0.6\n            xmax = 1', 'xmin = 0.9\n            xmax = 1')
+            path.write_text(grid)
+            return path
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "late")
+    result = _pipeline(mfa=LateMfa()).run(corpus, tmp_path / "output", None)
+    assert result.outcomes[0].reason_code == "alignment_acoustic_coverage"
+    artifact = tmp_path / "output" / "late"
+    audit = json.loads((artifact / "postprocess.json").read_text())
+    assert audit["uncovered_active_seconds"] > .6
+    assert not (artifact / "late.TextGrid").exists()
+    assert not (artifact / "alignment.json").exists()
+    assert not (artifact / ".japanmfa.complete").exists()
+
+
+def test_successful_pipeline_records_per_phone_mora_tone_trace(tmp_path: Path) -> None:
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "ok")
+    assert _pipeline().run(corpus, tmp_path / "output", None).outcomes[0].status == "aligned"
+    artifact = tmp_path / "output" / "ok"
+    payload = json.loads((artifact / "alignment.json").read_text())
+    assert [p["tone"] for p in payload["phones"]] == ["LL", "LL", "HH"]
+    assert payload["phones"][0]["morae"] == [{"token_index": 0, "index_in_token": 0, "kana": "キョ", "tone": "L"}]
+    assert json.loads((artifact / "postprocess.json").read_text())["passed"]
+
+
+def test_coverage_retry_realigns_lossless_units_and_records_original_failure(tmp_path: Path) -> None:
+    class RecoveryMfa(FakeMfa):
+        def align(self, corpus: Path, dictionary: Path, output: Path, work: Path) -> Path:
+            path = super().align(corpus, dictionary, output, work)
+            if "recovery" not in corpus.parts:
+                path.write_text(_GRID.replace('xmin = 0\n            xmax = 0.3', 'xmin = 0.7\n            xmax = 0.8').replace('xmin = 0.3\n            xmax = 0.6', 'xmin = 0.8\n            xmax = 0.9').replace('xmin = 0.6\n            xmax = 1', 'xmin = 0.9\n            xmax = 1'))
+            else:
+                aliases = (corpus / "clip.lab").read_text().split()
+                assert len(aliases) == 2
+                assert [row.split()[1:] for row in dictionary.read_text().splitlines()] == [["k", "jo"], ["u"]]
+                replacement = f'''intervals: size = 2
+        intervals [1]:
+            xmin = 0
+            xmax = 0.6
+            text = "{aliases[0]}"
+        intervals [2]:
+            xmin = 0.6
+            xmax = 1
+            text = "{aliases[1]}"'''
+                original = '''intervals: size = 1
+        intervals [1]:
+            xmin = 0
+            xmax = 1
+            text = "jmfa_000000"'''
+                path.write_text(_GRID.replace(original, replacement))
+            return path
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "recover")
+    result = _pipeline(mfa=RecoveryMfa()).run(corpus, tmp_path / "output", None)
+    assert result.outcomes[0].status == "aligned"
+    artifact = tmp_path / "output" / "recover"
+    audit = json.loads((artifact / "postprocess.json").read_text())
+    assert audit["recovery"]["accepted"]
+    assert audit["recovery"]["original_attempt"]["reason_code"] == "alignment_acoustic_coverage"
+    assert audit["recovery"]["requires_manual_review"]
+    data = json.loads((artifact / "alignment.json").read_text())
+    assert [p["label"] for p in data["phones"] if not p["silence"]] == ["k", "jo", "u"]
 
 
 def test_batch_writes_resolved_config_and_authoritative_asr_comparison(

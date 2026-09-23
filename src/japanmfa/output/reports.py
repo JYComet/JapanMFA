@@ -95,7 +95,15 @@ def redact_command(command: Sequence[str]) -> list[str]:
 
 
 def _safe(value: Any, *, key: str | None = None) -> Any:
-    if key and _sensitive_key(key):
+    # Linguistic token records are not authentication tokens. Exempt only
+    # these exact typed audit fields, and still redact nested secret fields.
+    linguistic_index = key in {"token_index", "index_in_token"} and (value is None or type(value) is int)
+    linguistic_records = key == "tokens" and isinstance(value, (list, tuple)) and all(
+        isinstance(item, Mapping) and type(item.get("index")) is int
+        and isinstance(item.get("surface"), str) and isinstance(item.get("reading"), str)
+        for item in value
+    )
+    if key and _sensitive_key(key) and not (linguistic_index or linguistic_records):
         return "[REDACTED]"
     if isinstance(value, Path):
         return _redact_string(str(value))

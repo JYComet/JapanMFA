@@ -117,12 +117,18 @@ audit artifacts. The tiers are exactly:
 2. `kana` — complete locked katakana, one interval covering the complete audio;
 3. `phones` — MFA phone intervals, including silence;
 4. `phone_kana` — kana projected onto the exact MFA phone intervals;
-5. `phone_tone` — H/L projected onto the exact MFA phone intervals.
+5. `phone_tone` — `HH / LL / HL / LH` projected from the contributing morae.
 
-Only the last three tiers are split at MFA boundaries. A long phone spanning
-multiple differently toned morae uses an ordered composite such as `H|L`; no
+Only the last three tiers share phone boundaries, including explicit silence.
+Bounded outer-edge acoustic refinements are audited in `postprocess.json`.
+A long phone spanning H then L morae is labeled `HL`; no
 invented internal boundary is created. See [input/output](docs/input-output.md),
 [architecture](docs/architecture.md), and [accent mapping](docs/accent-mapping.md).
+
+The [September 23 boundary repair report](docs/test-report-boundary-tone-20260923.md)
+includes the original failure, applicable ASRMFA--Pure postprocessing, and
+real-audio before/after results. Recovered alignments are explicitly flagged
+for manual review in `postprocess.json`.
 
 ## Recovery and diagnostics
 

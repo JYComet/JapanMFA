@@ -7,6 +7,23 @@ pronounced token.
 
 Known limitations:
 
+- The September 23 boundary repair changes speech-phone labels to
+  `HH / LL / HL / LH`; these encode predicted mora accent, not measured F0.
+  A phone with multiple pitch reversals fails `unsupported_tone_contour`.
+- Acoustic postprocessing adapts frame RMS, noise-floor estimation, sustained
+  activity detection, and nearby outer-edge refinement from ASRMFA--Pure.
+  It does not import Chinese/English lexical rules or arbitrary phone shifting.
+  Trims are bounded to 200 ms and extensions to 80 ms with 15 ms padding;
+  internal MFA speech-to-speech boundaries remain unchanged.
+- Energy is not a speech classifier. Background music, breaths, very quiet
+  speech and laughter can defeat these checks; a passed check establishes
+  energy coverage and geometry, not correct transcription or every phone edge.
+  A single recovery using lossless mora-group aliases may recover missing
+  coverage. All recovered results carry an explicit manual-review flag.
+- `alignment_acoustic_coverage` rejects omitted sustained energy;
+  `alignment_no_activity` rejects silent/no-speech-phone candidates.
+  Rejected items keep diagnostics and do not publish final artifacts.
+
 - Sudachi defaults and tdmelodic word-level `sy2a` do not resolve every
   sentence-context pitch change. Use span-addressed overrides for homographs
   and other context-sensitive readings.

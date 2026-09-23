@@ -14,6 +14,7 @@ scope.
   -> Japanese MFA G2P + occurrence aliases + locked dictionary
   -> MFA v3 validate/align -> final phone intervals
   -> mora-to-phone projection
+  -> acoustic coverage / bounded edge refinement / one optional MFA retry
   -> five-tier TextGrid + JSON/manifest/summary
 ```
 
@@ -32,11 +33,15 @@ orchestrator process.
   katakana. A bad override fails the utterance rather than moving to another
   occurrence.
 - tdmelodic predicts accent from the locked reading but never changes it.
-- MFA G2P determines a single phone string for each occurrence alias. MFA is
-  the only source of final time boundaries.
+- MFA G2P determines a single phone string for each occurrence alias. MFA
+  supplies phonetic boundaries; acoustic refinement can change only the two
+  outer speech edges, recording every change and preserving internal boundaries.
 - Projection checks the expected phone sequence and can only annotate each
   actual MFA phone; it does not subdivide a phone.
-- Output is published only after the five-tier structural validator passes.
+- A rejected coverage check may trigger one lossless mora-group MFA retry.
+  Long phones are never split, source-time offsets are restored, and the full
+  ordered phone sequence must remain identical.
+- Output is published only after acoustic and five-tier structural checks pass.
 
 Each utterance has isolated artifacts and a manifest outcome (`aligned`,
 `skipped`, or `failed`). Expected `SkipUtterance`/`StageFailure` values are

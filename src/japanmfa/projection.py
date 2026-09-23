@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import unicodedata
-from typing import cast
 
 from japanmfa.domain import Mora, PhoneAnnotation, PhoneInterval
 from japanmfa.errors import StageFailure
@@ -29,13 +28,22 @@ def _canonical_kana(value: str) -> str:
 
 def labels_for_phone(morae: tuple[Mora, ...]) -> tuple[str, str]:
     kana = "|".join(mora.kana for mora in morae)
-    if not kana or any(mora.tone is None for mora in morae):
+    if not kana or any(mora.tone not in {"H", "L"} for mora in morae):
         raise _failure(
             "unlabeled_phone",
             "every non-silence phone must map to toned morae",
             morae=[mora.kana for mora in morae],
         )
-    tone = "|".join(cast(str, mora.tone) for mora in morae)
+    tones = tuple(mora.tone for mora in morae)
+    if sum(left != right for left, right in zip(tones, tones[1:])) > 1:
+        raise _failure(
+            "unsupported_tone_contour",
+            "a two-point phone contour cannot encode multiple pitch reversals",
+            tones=list(tones),
+        )
+    # Constant pitch is HH/LL even for one mora. The whole ordered mora
+    # sequence remains on PhoneAnnotation; do not borrow neighboring tones.
+    tone = str(tones[0]) + str(tones[-1])
     return kana, tone
 
 

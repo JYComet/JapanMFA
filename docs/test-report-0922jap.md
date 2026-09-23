@@ -2,6 +2,11 @@
 
 Recorded: **2026-09-23 UTC** for the `0922jap` corpus.
 
+**Historical report:** its structural acceptance missed acoustic and export
+defects. See the subsequent [boundary/contour repair report](test-report-boundary-tone-20260923.md)
+for the reproduced failure, corrected outputs, acoustic checks, and remaining
+manual-review requirements. The final3 outputs below describe the old run.
+
 Task 12 completed a real-model preflight, discovery smoke/full runs, and an
 authoritative final five-item corpus run. The preflight passed all 10 checks.
 The authoritative run produced two aligned items and three failed items; no

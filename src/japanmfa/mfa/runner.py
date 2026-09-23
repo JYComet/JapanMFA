@@ -70,6 +70,7 @@ class MfaRunner:
             "--temporary_directory",
             str(work_dir),
             "--clean",
+            "--no_tokenization",
         ]
 
     def validate(self, corpus_dir: Path, dictionary: Path, work_dir: Path) -> None:
