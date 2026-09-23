@@ -41,14 +41,20 @@ def test_align_validates_first_and_uses_pinned_mfa_3_argv(tmp_path: Path, monkey
 
     assert textgrid == output / "aligned.TextGrid"
     commands = [json.loads(line) for line in argv_log.read_text().splitlines()]
-    assert commands[0][1:6] == [
+    assert commands[0][1:5] == [
         "validate",
         str(corpus),
         str(dictionary),
         "japanese_mfa",
-        "--output_directory",
     ]
-    assert commands[0][-1] == str(work)
+    assert commands[0][5:] == [
+        "--ignore_acoustics",
+        "--output_directory",
+        str(work),
+        "--temporary_directory",
+        str(work / "validate_temp"),
+        "--clean",
+    ]
     assert commands[1][1:6] == [
         "align",
         str(corpus),
@@ -121,6 +127,30 @@ def test_work_directory_must_be_strict_owned_descendant_before_mkdir(tmp_path: P
         "path_ownership_invalid",
     )
     assert not work.exists()
+
+
+def test_validate_rejects_symlinked_validate_temp_before_starting_mfa(
+    tmp_path: Path, monkeypatch
+) -> None:
+    corpus, dictionary, _output, work, owned_root = _inputs(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel.txt"
+    sentinel.write_text("untouched\n", encoding="utf-8")
+    work.mkdir()
+    (work / "validate_temp").symlink_to(outside, target_is_directory=True)
+    argv_log = tmp_path / "argv.jsonl"
+    monkeypatch.setenv("FAKE_MFA_ARGV_LOG", str(argv_log))
+
+    with pytest.raises(StageFailure) as exc_info:
+        _runner(owned_root).validate(corpus, dictionary, work)
+
+    assert (exc_info.value.stage, exc_info.value.reason_code) == (
+        "mfa",
+        "path_ownership_invalid",
+    )
+    assert sentinel.read_text(encoding="utf-8") == "untouched\n"
+    assert not argv_log.exists()
 
 
 @pytest.mark.parametrize("unsafe_root", [Path("/"), Path.home()])

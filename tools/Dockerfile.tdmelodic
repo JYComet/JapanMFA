@@ -32,6 +32,7 @@ RUN test -n "${TDMELODIC_REPOSITORY}" \
     && git clone "${TDMELODIC_REPOSITORY}" /opt/tdmelodic \
     && cd /opt/tdmelodic \
     && git checkout --detach "${TDMELODIC_COMMIT}" \
+    && pip install --no-cache-dir "numpy<2" "setuptools==59.8.0" \
     && pip install --no-cache-dir .
 
 WORKDIR /opt/tdmelodic

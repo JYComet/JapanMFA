@@ -10,7 +10,7 @@ dependencies:
       - PyYAML==6.0.2
       - praatio==6.2.0
       - sudachipy==0.6.10
-      - sudachidict-core==20240109
+      - sudachidict-core==20260723
       - typer==0.15.2
       - pytest==8.3.5
       - -e .

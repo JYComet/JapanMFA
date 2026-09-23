@@ -159,6 +159,8 @@ class MfaG2pClient:
             reading, phone_text = columns
             pronunciation = Pronunciation(reading, tuple(phone_text.split()))
             if reading in by_reading:
+                if by_reading[reading] == pronunciation:
+                    continue
                 raise _failure(
                     "multiple_pronunciations",
                     f"MFA G2P returned multiple pronunciations for {reading!r}",

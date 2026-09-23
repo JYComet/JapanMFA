@@ -10,4 +10,5 @@ dependencies:
       # the deployment. No qwen_asr package is installed in this checkout.
       - qwen-asr==0.0.6
       - torch==2.6.0
-      - transformers==4.51.3
+      # qwen-asr 0.0.6 requires transformers 4.57.6.
+      - transformers==4.57.6

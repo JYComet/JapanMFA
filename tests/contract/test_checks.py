@@ -434,6 +434,22 @@ def test_tdmelodic_dockerfile_checks_upstream_and_immutable_commit() -> None:
     assert 'ENTRYPOINT ["tdmelodic-sy2a"]' in dockerfile
 
 
+def test_tdmelodic_dockerfile_pins_numpy_for_chainer_compatibility() -> None:
+    dockerfile = (Path(__file__).parents[2] / "tools" / "Dockerfile.tdmelodic").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"numpy<2"' in dockerfile
+
+
+def test_tdmelodic_dockerfile_pins_setuptools_for_chainer_python311() -> None:
+    dockerfile = (Path(__file__).parents[2] / "tools" / "Dockerfile.tdmelodic").read_text(
+        encoding="utf-8"
+    )
+
+    assert '"setuptools==59.8.0"' in dockerfile
+
+
 def test_valid_setup_has_individual_passes_and_json_contract(tmp_path: Path, monkeypatch) -> None:
     fake = _fake(tmp_path)
     model = tmp_path / "qwen-model"

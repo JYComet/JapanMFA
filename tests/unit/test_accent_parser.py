@@ -28,6 +28,21 @@ def test_parse_accent_allows_initial_high_fall_and_final_high_run() -> None:
     assert tones("カ[イ", "カ", "イ") == ["L", "H"]
 
 
+def test_parse_accent_allows_trailing_fall_after_single_mora() -> None:
+    assert tones("ト]", "ト") == ["H"]
+
+
+def test_parse_accent_allows_trailing_fall_after_final_high_mora() -> None:
+    assert tones("タ[チ]", "タ", "チ") == ["L", "H"]
+
+
+def test_parse_accent_rejects_trailing_rise_without_a_following_mora() -> None:
+    with pytest.raises(StageFailure) as exc_info:
+        parse_accent("ト[", locked("ト"))
+
+    assert exc_info.value.reason_code == "malformed_output"
+
+
 @pytest.mark.parametrize(
     "marked",
     [

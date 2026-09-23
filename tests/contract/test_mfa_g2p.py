@@ -33,7 +33,40 @@ def test_g2p_writes_locked_wordlist_and_preserves_duplicate_positions(tmp_path: 
     assert re.fullmatch(r".*/fake_mfa.py", str(FAKE_MFA))
 
 
-@pytest.mark.parametrize("mode", ["missing", "multiple", "oov", "mismatch"])
+def test_g2p_accepts_identical_duplicate_dictionary_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_MFA_MODE", "multiple")
+
+    result = client().pronounce(("キョウ", "ハレ", "キョウ"), tmp_path / "multiple")
+
+    assert result == (
+        Pronunciation("キョウ", ("k", "jo", "N")),
+        Pronunciation("ハレ", ("h", "a", "r", "e")),
+        Pronunciation("キョウ", ("k", "jo", "N")),
+    )
+
+
+def test_g2p_rejects_conflicting_duplicate_dictionary_rows(tmp_path: Path) -> None:
+    command = tmp_path / "conflicting_mfa.py"
+    command.write_text(
+        "from pathlib import Path\n"
+        "import sys\n"
+        "Path(sys.argv[4]).write_text(\n"
+        "    'キョウ\\tk jo N\\nキョウ\\tk a N\\n', encoding='utf-8'\n"
+        ")\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StageFailure) as exc_info:
+        MfaG2pClient((sys.executable, str(command))).pronounce(
+            ("キョウ",), tmp_path / "conflicting"
+        )
+
+    assert exc_info.value.reason_code == "multiple_pronunciations"
+
+
+@pytest.mark.parametrize("mode", ["missing", "oov", "mismatch"])
 def test_g2p_rejects_incomplete_or_ambiguous_dictionary_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
 ) -> None:

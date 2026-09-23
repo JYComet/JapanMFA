@@ -5,6 +5,10 @@ For every pronounced Sudachi token, JapanMFA calls exactly
 tdmelodic may add bracket events but cannot replace the reading. The parser
 normalizes hiragana/katakana, verifies that the unmarked output equals the
 locked reading, and assigns exactly one `H` or `L` to each mora.
+At a mora boundary, `[` raises the following mora and `]` lowers the following
+mora. A final `]` is also accepted as the fall after the final mora (without
+changing that mora's assigned label); a final `[` remains malformed because it
+cannot affect a following mora.
 
 The mora sequence is then paired with the single MFA-G2P phone sequence selected
 for that token occurrence. MFA alignment is run against safe per-occurrence

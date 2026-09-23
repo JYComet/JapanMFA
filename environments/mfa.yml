@@ -4,6 +4,11 @@ channels:
 dependencies:
   # Verified locally with `mfa version` on 2026-09-22.
   - python=3.11
+  - pip=25.0
   - montreal-forced-alignment=3.3.9
   - ffmpeg=7.1
 
+  - pip:
+      - spacy==3.8.7
+      - sudachipy==0.6.10
+      - sudachidict-core==20260723

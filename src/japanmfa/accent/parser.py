@@ -87,8 +87,9 @@ def parse_accent(
 
     Brackets are transitions at mora boundaries.  When the first transition
     is a fall, the first mora starts high; otherwise it starts low.  Events
-    must alternate rise and fall and must have a following mora whose pitch
-    they affect.
+    must alternate rise and fall.  A trailing fall is allowed to record the
+    fall after the final mora, but a trailing rise is malformed because it
+    cannot affect a mora.
     """
     if not isinstance(marked_yomi, str):
         raise _failure("malformed_output", "tdmelodic output must be text")
@@ -130,11 +131,20 @@ def parse_accent(
         tones.append(pitch)
 
     trailing_boundary = len(locked_morae)
-    if trailing_boundary in events:
+    trailing_marker = events.get(trailing_boundary)
+    if trailing_marker == "[":
         raise _failure(
             "malformed_output",
             "accent marker must affect a subsequent mora",
             boundary=trailing_boundary,
         )
+    if trailing_marker == "]":
+        if pitch == "L":
+            raise _failure(
+                "malformed_output",
+                "a fall occurs while pitch is already low",
+                boundary=trailing_boundary,
+            )
+        pitch = "L"
 
     return tuple(replace(mora, tone=tone) for mora, tone in zip(locked_morae, tones))

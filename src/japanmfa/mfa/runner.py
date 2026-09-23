@@ -48,8 +48,12 @@ class MfaRunner:
             str(corpus_dir),
             str(dictionary),
             self._model,
+            "--ignore_acoustics",
             "--output_directory",
             str(work_dir),
+            "--temporary_directory",
+            str(work_dir / "validate_temp"),
+            "--clean",
         ]
 
     def _build_align_command(
@@ -73,6 +77,7 @@ class MfaRunner:
         corpus_dir = Path(corpus_dir)
         dictionary = Path(dictionary)
         work_dir = self._prepare_work_dir(work_dir, corpus_dir)
+        self._prepare_validate_temp_dir(work_dir)
         self._run(
             self._build_validate_command(corpus_dir, dictionary, work_dir),
             work_dir,
@@ -88,6 +93,7 @@ class MfaRunner:
         output_dir = Path(output_dir)
         self._validate_paths(corpus_dir, work_dir, output_dir)
         work_dir = self._create_work_dir(work_dir)
+        self._prepare_validate_temp_dir(work_dir)
         self._run(
             self._build_validate_command(corpus_dir, dictionary, work_dir),
             work_dir,
@@ -210,6 +216,61 @@ class MfaRunner:
     ) -> Path:
         _corpus, work, _output = self._validate_paths(corpus_dir, work_dir, output_dir)
         return self._create_work_dir(work)
+
+    def _prepare_validate_temp_dir(self, work_dir: Path) -> Path:
+        """Prepare the validate-only temporary directory within the owned work tree."""
+        temporary = Path(work_dir) / "validate_temp"
+        if self._owned_root not in temporary.parents:
+            raise _failure(
+                "path_ownership_invalid",
+                "MFA validation temporary directory must be a strict descendant of owned_root",
+                owned_root=str(self._owned_root),
+                temporary_directory=str(temporary),
+            )
+
+        current = temporary
+        while current != self._owned_root:
+            if current.is_symlink():
+                raise _failure(
+                    "path_ownership_invalid",
+                    "MFA validation temporary path cannot contain symlink components",
+                    owned_root=str(self._owned_root),
+                    temporary_directory=str(temporary),
+                    symlink=str(current),
+                )
+            current = current.parent
+
+        try:
+            resolved = temporary.resolve()
+        except OSError as exc:
+            raise _failure(
+                "path_ownership_invalid",
+                "could not resolve MFA validation temporary directory",
+                owned_root=str(self._owned_root),
+                temporary_directory=str(temporary),
+                error=str(exc),
+            ) from exc
+        if resolved != temporary or self._owned_root not in resolved.parents:
+            raise _failure(
+                "path_ownership_invalid",
+                "MFA validation temporary directory escapes owned_root",
+                owned_root=str(self._owned_root),
+                temporary_directory=str(temporary),
+                resolved_directory=str(resolved),
+            )
+
+        try:
+            if temporary.exists() and not temporary.is_dir():
+                raise OSError("path is not a directory")
+            temporary.mkdir(parents=False, exist_ok=True)
+        except OSError as exc:
+            raise _failure(
+                "work_directory_failed",
+                f"could not create MFA validation temporary directory: {temporary}",
+                temporary_directory=str(temporary),
+                error=str(exc),
+            ) from exc
+        return temporary
 
     @staticmethod
     def _create_work_dir(work_dir: Path) -> Path:
