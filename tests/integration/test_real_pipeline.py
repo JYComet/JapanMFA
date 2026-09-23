@@ -11,7 +11,8 @@ import pytest
 
 from japanmfa.accent.tdmelodic import TdmelodicClient
 from japanmfa.config import PipelineConfig
-from japanmfa.output.textgrid import validate_five_tier_textgrid
+from japanmfa.domain import PhoneAnnotation, PhoneInterval
+from japanmfa.output.textgrid import validate_five_tier_textgrid, write_five_tier_textgrid
 from japanmfa.pipeline import JapanMFAPipeline
 
 
@@ -46,6 +47,108 @@ def test_real_artifact_validator_rejects_nonterminal_manifest_status(tmp_path: P
 
     with pytest.raises(AssertionError, match="non-terminal status"):
         _validate_real_artifact(tmp_path, frozenset({""}))
+
+
+def test_real_artifact_validator_checks_every_aligned_artifact(tmp_path: Path) -> None:
+    first = tmp_path / "artifact-u1"
+    second = tmp_path / "artifact-u2"
+    _write_aligned_fixture(first, "u1", metadata_duration=1.0, grid_duration=1.0)
+    _write_aligned_fixture(second, "u2", metadata_duration=2.0, grid_duration=1.0)
+    (tmp_path / "manifest.jsonl").write_text(
+        "\n".join(
+            json.dumps(
+                {"status": "aligned", "utterance_id": utterance_id, "artifact_dir": str(artifact)}
+            )
+            for utterance_id, artifact in (("u1", first), ("u2", second))
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "summary.json").write_text(
+        json.dumps({"total": 2, "counts": {"aligned": 2, "failed": 0, "skipped": 0}}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="header duration does not match requested duration"):
+        _validate_real_artifact(tmp_path, frozenset({""}))
+
+
+def test_real_pipeline_explicit_missing_output_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("JAPANMFA_REAL_PIPELINE_OUTPUT", str(tmp_path / "missing-output"))
+    monkeypatch.delenv("JAPANMFA_REAL_PIPELINE_CONFIG", raising=False)
+    monkeypatch.delenv("JAPANMFA_REAL_PIPELINE_INPUT", raising=False)
+
+    with pytest.raises(AssertionError, match="lacks manifest.jsonl"):
+        test_real_pipeline_validates_aligned_five_tier_artifact(tmp_path, monkeypatch)
+
+
+def test_real_artifact_validator_resolves_textgrid_from_metadata_for_nested_id(tmp_path: Path) -> None:
+    artifact = tmp_path / "artifact-u1"
+    _write_aligned_fixture(artifact, "u1", metadata_duration=1.0, grid_duration=1.0)
+    (tmp_path / "manifest.jsonl").write_text(
+        json.dumps(
+            {
+                "status": "aligned",
+                "utterance_id": "nested/u1",
+                "artifact_dir": str(artifact),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "summary.json").write_text(
+        json.dumps({"total": 1, "counts": {"aligned": 1, "failed": 0, "skipped": 0}}),
+        encoding="utf-8",
+    )
+
+    _validate_real_artifact(tmp_path, frozenset({""}))
+
+
+def _write_aligned_fixture(
+    artifact: Path,
+    utterance_id: str,
+    *,
+    metadata_duration: float,
+    grid_duration: float,
+) -> None:
+    artifact.mkdir(parents=True)
+    write_five_tier_textgrid(
+        artifact / f"{utterance_id}.TextGrid",
+        grid_duration,
+        "原文",
+        "ゲンブン",
+        (
+            PhoneAnnotation(
+                PhoneInterval(0.0, grid_duration, "k"),
+                token_index=0,
+                morae=(),
+                kana_label="ゲ",
+                tone_label="L",
+                is_silence=False,
+            ),
+        ),
+    )
+    (artifact / "alignment.json").write_text(
+        json.dumps(
+            {
+                "duration": metadata_duration,
+                "textgrid": str((artifact / f"{utterance_id}.TextGrid").resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifact / ".japanmfa.complete").write_text(
+        json.dumps(
+            {
+                "textgrid": str((artifact / f"{utterance_id}.TextGrid").resolve()),
+                "alignment": str((artifact / "alignment.json").resolve()),
+            }
+        ),
+        encoding="utf-8",
+    )
+    for required_name in ("asr.json", "frontend.json", "mora.json", "mfa.json"):
+        (artifact / required_name).write_text("{}\n", encoding="utf-8")
+    (artifact / "mfa").mkdir()
 
 
 def _command(command_name: str, runtime_name: str) -> tuple[str, ...]:
@@ -105,22 +208,69 @@ def _validate_real_artifact(root: Path, silence_labels: frozenset[str]) -> None:
     )
     aligned = [row for row in rows if row.get("status") == "aligned"]
     assert aligned, "real pipeline produced no aligned outcome"
-    artifact = root / str(aligned[0]["artifact_dir"])
-    metadata = json.loads((artifact / "alignment.json").read_text(encoding="utf-8"))
-    grid = artifact / f"{aligned[0]['utterance_id']}.TextGrid"
-    validate_five_tier_textgrid(grid, float(metadata["duration"]), silence_labels)
-    phone_boundaries = _tier_boundaries(grid, "phones")
-    phone_kana_boundaries = _tier_boundaries(grid, "phone_kana")
-    phone_tone_boundaries = _tier_boundaries(grid, "phone_tone")
-    assert phone_boundaries == phone_kana_boundaries == phone_tone_boundaries
+    root_resolved = root.resolve()
+    for index, row in enumerate(aligned):
+        artifact_value = row.get("artifact_dir")
+        assert isinstance(artifact_value, str) and artifact_value, (
+            f"aligned manifest row {index} has no artifact_dir"
+        )
+        artifact = Path(artifact_value)
+        if not artifact.is_absolute():
+            artifact = root / artifact
+        artifact = artifact.resolve()
+        try:
+            artifact.relative_to(root_resolved)
+        except ValueError as exc:
+            raise AssertionError(f"aligned manifest row {index} artifact escapes output root") from exc
+
+        metadata_path = artifact / "alignment.json"
+        marker_path = artifact / ".japanmfa.complete"
+        assert marker_path.is_file(), (
+            f"aligned manifest row {index} lacks completion marker"
+        )
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        for required_name in ("asr.json", "frontend.json", "mora.json", "mfa.json"):
+            required_path = artifact / required_name
+            assert required_path.is_file(), (
+                f"aligned manifest row {index} lacks {required_name}"
+            )
+            assert isinstance(
+                json.loads(required_path.read_text(encoding="utf-8")), dict
+            )
+        assert (artifact / "mfa").is_dir(), (
+            f"aligned manifest row {index} lacks MFA diagnostic directory"
+        )
+        textgrid_value = metadata.get("textgrid")
+        assert isinstance(textgrid_value, str) and textgrid_value, (
+            f"aligned manifest row {index} alignment.json has no textgrid path"
+        )
+        grid = Path(textgrid_value)
+        if not grid.is_absolute():
+            grid = artifact / grid
+        grid = grid.resolve()
+        try:
+            grid.relative_to(artifact)
+        except ValueError as exc:
+            raise AssertionError(f"aligned manifest row {index} textgrid escapes artifact") from exc
+
+        assert Path(str(marker.get("textgrid"))).resolve() == grid
+        assert Path(str(marker.get("alignment"))).resolve() == metadata_path.resolve()
+
+        validate_five_tier_textgrid(grid, float(metadata["duration"]), silence_labels)
+        phone_boundaries = _tier_boundaries(grid, "phones")
+        phone_kana_boundaries = _tier_boundaries(grid, "phone_kana")
+        phone_tone_boundaries = _tier_boundaries(grid, "phone_tone")
+        assert phone_boundaries == phone_kana_boundaries == phone_tone_boundaries
 
 
 def test_real_pipeline_validates_aligned_five_tier_artifact(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     sample_output = os.environ.get("JAPANMFA_REAL_PIPELINE_OUTPUT")
     if sample_output:
         root = Path(sample_output).expanduser()
-        if not (root / "manifest.jsonl").is_file():
-            pytest.skip(f"JAPANMFA_REAL_PIPELINE_OUTPUT lacks manifest.jsonl: {root}")
+        assert (root / "manifest.jsonl").is_file(), (
+            f"JAPANMFA_REAL_PIPELINE_OUTPUT lacks manifest.jsonl: {root}"
+        )
         _validate_real_artifact(root, frozenset({"", "sil", "sp", "spn"}))
         return
 

@@ -13,6 +13,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 from japanmfa import __version__
 from japanmfa.domain import UtteranceOutcome
 
@@ -45,7 +47,14 @@ _STATUSES = ("aligned", "skipped", "failed")
 
 def _sensitive_key(key: str) -> bool:
     normalized = re.sub(r"[^a-z0-9]", "", key.casefold())
-    return any(marker in normalized for marker in _SENSITIVE_MARKERS)
+    for marker in _SENSITIVE_MARKERS:
+        # ``authoritative`` is an audit term, not an authentication secret;
+        # avoid treating it as the ``auth`` marker.
+        if marker == "auth" and normalized.startswith("authoritative"):
+            continue
+        if marker in normalized:
+            return True
+    return False
 
 
 def _secret_values() -> frozenset[str]:
@@ -60,6 +69,29 @@ def _redact_string(value: str) -> str:
     for secret in sorted(_secret_values(), key=len, reverse=True):
         value = value.replace(secret, "[REDACTED]")
     return value
+
+
+def redact_command(command: Sequence[str]) -> list[str]:
+    """Redact values attached to secret-like command-line options."""
+    rendered: list[str] = []
+    redact_next = False
+    for raw in command:
+        argument = str(raw)
+        if redact_next:
+            rendered.append("<redacted>")
+            redact_next = False
+            continue
+        if argument.startswith("-"):
+            option, separator, _value = argument.partition("=")
+            if _sensitive_key(option.lstrip("-")):
+                if separator:
+                    rendered.append(f"{option}=<redacted>")
+                else:
+                    rendered.append(option)
+                    redact_next = True
+                continue
+        rendered.append(_redact_string(argument))
+    return rendered
 
 
 def _safe(value: Any, *, key: str | None = None) -> Any:
@@ -78,23 +110,38 @@ def _safe(value: Any, *, key: str | None = None) -> Any:
     return value
 
 
-def _json_bytes(payload: Mapping[str, object]) -> bytes:
+def _safe_payload(payload: Mapping[str, object]) -> Any:
     if not isinstance(payload, Mapping):
         raise TypeError("payload must be a mapping")
+    return _safe(payload)
+
+
+def _json_bytes(payload: Mapping[str, object]) -> bytes:
     try:
         rendered = json.dumps(
-            _safe(payload), ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
+            _safe_payload(payload), ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False
         )
     except (TypeError, ValueError) as exc:
         raise ValueError("payload is not JSON serializable") from exc
     return (rendered + "\n").encode("utf-8")
 
 
-def write_json(path: Path, payload: Mapping[str, object]) -> None:
-    """Atomically write stable UTF-8 JSON with no environment secrets."""
+def _yaml_bytes(payload: Mapping[str, object]) -> bytes:
+    try:
+        rendered = yaml.safe_dump(
+            _safe_payload(payload),
+            allow_unicode=True,
+            sort_keys=True,
+            default_flow_style=False,
+        )
+    except (TypeError, ValueError, yaml.YAMLError) as exc:
+        raise ValueError("payload is not YAML serializable") from exc
+    return rendered.encode("utf-8")
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    data = _json_bytes(payload)
     temporary: Path | None = None
     try:
         descriptor, temporary_name = tempfile.mkstemp(
@@ -113,6 +160,16 @@ def write_json(path: Path, payload: Mapping[str, object]) -> None:
                 temporary.unlink()
             except FileNotFoundError:
                 pass
+
+
+def write_json(path: Path, payload: Mapping[str, object]) -> None:
+    """Atomically write stable UTF-8 JSON with no environment secrets."""
+    _atomic_write(Path(path), _json_bytes(payload))
+
+
+def write_yaml(path: Path, payload: Mapping[str, object]) -> None:
+    """Atomically write stable UTF-8 YAML with no environment secrets."""
+    _atomic_write(Path(path), _yaml_bytes(payload))
 
 
 def _validate_outcome(outcome: UtteranceOutcome) -> None:
@@ -149,9 +206,11 @@ def _relative_artifact(manifest: Path, artifact: Path | None) -> str | None:
     return os.path.relpath(str(artifact), start=str(manifest.parent.resolve()))
 
 
-def append_manifest(path: Path, outcome: UtteranceOutcome) -> None:
+def append_manifest(path: Path, outcome: UtteranceOutcome, *, source_type: str = "unknown") -> None:
     """Append one validated, traceable outcome while holding an inter-process lock."""
     _validate_outcome(outcome)
+    if source_type not in {"txt", "asr", "unknown"}:
+        raise ValueError("source_type must be txt, asr, or unknown")
     manifest = Path(path)
     manifest.parent.mkdir(parents=True, exist_ok=True)
     record: dict[str, object] = {
@@ -159,7 +218,7 @@ def append_manifest(path: Path, outcome: UtteranceOutcome) -> None:
         "message": outcome.message,
         "reason_code": outcome.reason_code,
         "run_id": os.environ.get("JAPANMFA_RUN_ID") or _RUN_ID,
-        "source_type": "unknown",
+        "source_type": source_type,
         "stage": "pipeline",
         "stage_durations": dict(sorted(outcome.stage_durations.items())),
         "status": outcome.status,
@@ -204,4 +263,10 @@ def summarize(outcomes: Sequence[UtteranceOutcome]) -> dict[str, object]:
     return {"total": sum(counts.values()), "counts": counts, "reasons": stable_reasons}
 
 
-__all__ = ["append_manifest", "summarize", "write_json"]
+__all__ = [
+    "append_manifest",
+    "redact_command",
+    "summarize",
+    "write_json",
+    "write_yaml",
+]

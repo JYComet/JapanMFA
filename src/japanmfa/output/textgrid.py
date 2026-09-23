@@ -15,7 +15,9 @@ from japanmfa.domain import PhoneAnnotation
 
 _ITEM_RE = re.compile(r"^\s{4}item\s+\[\d+\]:\s*$")
 _INTERVAL_RE = re.compile(r"^\s+intervals\s+\[\d+\]:\s*$")
-_FIELD_RE = re.compile(r"^\s*(class|name|xmin|xmax|text)\s*=\s*(.*?)\s*$")
+_FIELD_RE = re.compile(
+    r"^\s*(class|name|xmin|xmax|text)\s*=\s*(.*?)\s*$", re.DOTALL
+)
 _SIZE_RE = re.compile(r"^\s*(?:size|intervals:\s*size)\s*=\s*(\d+)\s*$")
 _EXPECTED_TIERS = ("original", "kana", "phones", "phone_kana", "phone_tone")
 
@@ -81,9 +83,50 @@ def _field_map(lines: Sequence[str], fields: set[str]) -> dict[str, str]:
     return found
 
 
+def _logical_lines(text: str) -> tuple[str, ...]:
+    """Split a long TextGrid into records without splitting quoted labels.
+
+    Praat's long-text format permits a quoted label to contain physical line
+    breaks.  The line breaks are part of the label, so using ``splitlines``
+    would both make the field malformed and lose CRLF-versus-LF information.
+    Quote escaping uses a doubled quote (``""``), which is handled while
+    looking for the closing quote.
+    """
+
+    lines: list[str] = []
+    start = 0
+    in_quote = False
+    index = 0
+    while index < len(text):
+        character = text[index]
+        if character == '"':
+            if in_quote and index + 1 < len(text) and text[index + 1] == '"':
+                index += 2
+                continue
+            in_quote = not in_quote
+            index += 1
+            continue
+        if not in_quote and character in "\r\n":
+            lines.append(text[start:index])
+            if (
+                character == "\r"
+                and index + 1 < len(text)
+                and text[index + 1] == "\n"
+            ):
+                index += 2
+            else:
+                index += 1
+            start = index
+            continue
+        index += 1
+    lines.append(text[start:])
+    return tuple(lines)
+
+
 def _parse(path: Path) -> tuple[float, float, tuple[_ParsedTier, ...]]:
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        with path.open("r", encoding="utf-8", newline="") as stream:
+            lines = _logical_lines(stream.read())
     except (OSError, UnicodeDecodeError) as exc:
         raise _error(f"could not read {path}") from exc
 

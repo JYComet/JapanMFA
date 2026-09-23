@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import subprocess
 import tempfile
 import unicodedata
@@ -19,6 +18,7 @@ from pathlib import Path
 from typing import Sequence
 
 from .accent.parser import parse_accent
+from .accent.tdmelodic import resolve_tdmelodic_command
 from .config import PipelineConfig
 from .domain import Token
 from .frontend.mora import segment_morae
@@ -68,6 +68,7 @@ _GENERIC_SECRET_VALUES = frozenset(
         "token",
     }
 )
+_TRUE_ENV_VALUES = frozenset({"1", "true", "yes"})
 
 
 @dataclass(frozen=True)
@@ -311,16 +312,53 @@ def _asr_model(config: PipelineConfig) -> PreflightCheck:
 
 
 def _qwen_cuda(config: PipelineConfig, timeout: float) -> PreflightCheck:
-    if os.environ.get("JAPANMFA_REQUIRE_CUDA", "0").lower() not in {"1", "true", "yes"}:
-        return _check("qwen_cuda", True, "not_required", "CUDA check not required; CPU policy is not explicitly disabled")
+    cuda_required = os.environ.get("JAPANMFA_REQUIRE_CUDA", "0").casefold() in _TRUE_ENV_VALUES
     executable = _asr_executable(config)
     command = (executable, "-c", "import torch; print(torch.cuda.is_available())")
     stdout, _stderr, returncode, error = _run(command, timeout=timeout)
     if error or returncode != 0:
-        return _check("qwen_cuda", False, "cuda_probe_failed", "could not determine CUDA availability for Qwen", "Install a CUDA-enabled ASR runtime or unset JAPANMFA_REQUIRE_CUDA to allow CPU policy.", command)
-    if stdout.strip().lower() not in {"1", "true", "yes"}:
-        return _check("qwen_cuda", False, "cuda_unavailable", "CUDA is unavailable while CPU execution is explicitly disallowed", "Use a CUDA-enabled ASR environment or unset JAPANMFA_REQUIRE_CUDA to allow CPU policy.", command)
-    return _check("qwen_cuda", True, "ok", "CUDA is available for Qwen", command=command)
+        return _check(
+            "qwen_cuda",
+            False,
+            "cuda_probe_failed",
+            "could not determine CUDA availability for Qwen",
+            "Install a working ASR torch runtime before running the Qwen worker.",
+            command,
+        )
+    value = stdout.strip().casefold()
+    if value not in {"1", "true", "yes", "0", "false", "no"}:
+        return _check(
+            "qwen_cuda",
+            False,
+            "cuda_probe_failed",
+            "Qwen CUDA probe returned a non-boolean value",
+            "Verify that the configured ASR interpreter can run `torch.cuda.is_available()`.",
+            command,
+        )
+    if value in {"0", "false", "no"}:
+        if cuda_required:
+            return _check(
+                "qwen_cuda",
+                False,
+                "cuda_unavailable",
+                "CUDA is unavailable while CPU execution is explicitly disallowed",
+                "Use a CUDA-enabled ASR environment or unset JAPANMFA_REQUIRE_CUDA to allow CPU policy.",
+                command,
+            )
+        return _check(
+            "qwen_cuda",
+            True,
+            "cpu_fallback",
+            "CUDA is unavailable; Qwen will use CPU with float32",
+            command=command,
+        )
+    return _check(
+        "qwen_cuda",
+        True,
+        "cuda_available",
+        "CUDA is available; Qwen will use cuda:0 with bfloat16",
+        command=command,
+    )
 
 
 def _writable(name: str, path: Path) -> PreflightCheck:
@@ -344,13 +382,12 @@ def _canonical_katakana(value: str) -> str:
 
 
 def _tdmelodic_probe(timeout: float) -> PreflightCheck:
-    raw = os.environ.get("JAPANMFA_TDMELODIC_COMMAND", "tdmelodic")
     try:
-        command = tuple(shlex.split(raw))
-    except ValueError:
+        command = resolve_tdmelodic_command()
+    except ValueError as exc:
+        if "empty" in str(exc):
+            return _check("tdmelodic_probe", False, "probe_malformed", "tdmelodic command configuration is empty", "Set JAPANMFA_TDMELODIC_COMMAND to the isolated tdmelodic command.")
         return _check("tdmelodic_probe", False, "probe_malformed", "tdmelodic command configuration is malformed", "Set JAPANMFA_TDMELODIC_COMMAND as an argv-like command.")
-    if not command:
-        return _check("tdmelodic_probe", False, "probe_malformed", "tdmelodic command configuration is empty", "Set JAPANMFA_TDMELODIC_COMMAND to the isolated tdmelodic command.")
     stdout, _stderr, returncode, error = _run(command, input_text=f"{_PROBE_SURFACE},{_PROBE_YOMI}\n", timeout=timeout)
     if error == "executable_missing":
         return _check("tdmelodic_probe", False, "executable_missing", "tdmelodic executable could not be started", "Build or activate the isolated tdmelodic runtime, then set JAPANMFA_TDMELODIC_COMMAND.", command)

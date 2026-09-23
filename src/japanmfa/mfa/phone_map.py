@@ -45,6 +45,10 @@ class PhoneRule:
 
     kana: tuple[str, ...]
     phones: tuple[str, ...]
+    # Half-open indices into ``kana`` for each output phone.  The explicit
+    # spans are what distinguish a one-to-one sequence from a phone that
+    # covers multiple morae (or a mora repeated over several phones).
+    mora_spans: tuple[tuple[int, int], ...]
     cost: int = 0
 
 
@@ -137,7 +141,7 @@ def _parse_rules(raw: object, normalizations: Mapping[str, str]) -> list[PhoneRu
     for index, item in enumerate(raw):
         if not isinstance(item, Mapping):
             raise _failure("invalid_rule", "each phone-map rule must be a mapping", index=index)
-        unknown = set(item) - {"kana", "phones", "cost"}
+        unknown = set(item) - {"kana", "phones", "mora_spans", "cost"}
         if unknown:
             raise _failure(
                 "unknown_rule_field",
@@ -158,6 +162,9 @@ def _parse_rules(raw: object, normalizations: Mapping[str, str]) -> list[PhoneRu
         ):
             raise _failure("invalid_rule", "rule phones must be a non-empty string array", index=index)
         phones_tuple = tuple(normalizations.get(phone, phone) for phone in phones)
+        mora_spans = _parse_mora_spans(
+            item.get("mora_spans"), len(kana_tuple), len(phones_tuple), index
+        )
         cost = item.get("cost", 0)
         if isinstance(cost, bool) or not isinstance(cost, int) or cost < 0:
             raise _failure("invalid_rule", "rule cost must be a non-negative integer", index=index)
@@ -165,8 +172,78 @@ def _parse_rules(raw: object, normalizations: Mapping[str, str]) -> list[PhoneRu
         if identity in seen:
             raise _failure("duplicate_rule", "phone-map rules must be unique", index=index)
         seen.add(identity)
-        rules.append(PhoneRule(kana_tuple, phones_tuple, cost))
+        rules.append(PhoneRule(kana_tuple, phones_tuple, mora_spans, cost))
     return rules
+
+
+def _parse_mora_spans(
+    raw: object, kana_count: int, phone_count: int, index: int
+) -> tuple[tuple[int, int], ...]:
+    """Validate or infer each phone's half-open mora range.
+
+    The only implicit many-to-many cases are unambiguous cardinality cases:
+    one mora to many phones and many morae to one phone.  A rule with more
+    than one item on both sides and unequal lengths must declare spans so we
+    never guess how the alignment should be projected.
+    """
+    if raw is None:
+        if kana_count == phone_count:
+            return tuple((position, position + 1) for position in range(kana_count))
+        if kana_count == 1:
+            return ((0, 1),) * phone_count
+        if phone_count == 1:
+            return ((0, kana_count),)
+        raise _failure(
+            "invalid_rule",
+            "multi-mora/multi-phone rules with unequal lengths require mora_spans",
+            index=index,
+        )
+
+    if not isinstance(raw, list) or len(raw) != phone_count:
+        raise _failure(
+            "invalid_rule",
+            "mora_spans must contain one [start, end] range per phone",
+            index=index,
+        )
+    spans: list[tuple[int, int]] = []
+    for span in raw:
+        if (
+            not isinstance(span, list)
+            or len(span) != 2
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in span)
+        ):
+            raise _failure(
+                "invalid_rule",
+                "each mora_spans item must be an integer [start, end] pair",
+                index=index,
+            )
+        start, end = span
+        if not 0 <= start < end <= kana_count:
+            raise _failure(
+                "invalid_rule",
+                "mora_spans ranges must be non-empty and within the kana pattern",
+                index=index,
+            )
+        spans.append((start, end))
+
+    if spans[0][0] != 0 or spans[-1][1] != kana_count:
+        raise _failure(
+            "invalid_rule",
+            "mora_spans must cover the complete kana pattern in phone order",
+            index=index,
+        )
+    if any(
+        previous[0] > current[0]
+        or previous[1] < current[0]
+        or previous[1] > current[1]
+        for previous, current in zip(spans, spans[1:])
+    ):
+        raise _failure(
+            "invalid_rule",
+            "mora_spans must be ordered and gap-free in phone order",
+            index=index,
+        )
+    return tuple(spans)
 
 
 __all__ = ["EXPECTED_MODEL_FAMILY", "PhoneMap", "PhoneRule"]

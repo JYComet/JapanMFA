@@ -36,7 +36,20 @@ have empty auxiliary labels; every non-silence phone must have both labels.
 Per-utterance JSON stores source text, ASR result, tokens, overrides, morae,
 tdmelodic output, G2P/alias data, MFA diagnostics, projections, and the final
 validation result. Batch `manifest.jsonl` stores one outcome per utterance;
-`summary.json` groups status and reason codes.
+`summary.json` groups status and reason codes. Every batch also atomically
+writes `resolved_config.yaml`. It records the effective configuration,
+resolved input/output/cache paths, ASR/MFA/tdmelodic models and commands,
+JapanMFA/Python versions, and installed orchestrator dependency versions.
+Sensitive environment values and secret-like configuration fields are redacted.
+The manifest `source_type` is `txt` when an authoritative sidecar exists and
+`asr` when the utterance used ASR fallback.
+
+When an authoritative `.txt` exists, `asr.json` retains the original text and
+adds `comparison` with the normalized authoritative and ASR strings, an
+`equal` flag, and a `difference` object when they differ. Normalization for
+this audit is NFKC, removal of CR/LF separators, and trimming surrounding
+whitespace. The original text is never rewritten. If no `.txt` exists, the
+comparison is marked `performed: false` with reason `no_authoritative_text`.
 
 ## Status and recovery
 

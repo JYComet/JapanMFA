@@ -31,6 +31,16 @@ Known limitations:
   `--temporary_directory`, and `--clean` is used for the isolated validation
   workspace. These flags are operational safeguards, not a change to source
   ownership.
+- Multiline TextGrid input, NFC normalization, frontend-cache isolation, and
+  `mora_spans` are covered by the final review. The aligned-output audit
+  contract is checked for every aligned item, and an atomic `.japanmfa.complete`
+  marker is published only with the final artifacts. Cache roots that overlap
+  either the source corpus or the output root are rejected before any batch
+  write; these safeguards do not expand the pinned MFA phone map.
+- `run` and `check` use the same configured Qwen and tdmelodic selections, and
+  `resolved_config.yaml` records the effective commands for an acceptance run.
+  CLI compatibility is locked to Click 8.1.8 for this environment; this is a
+  reproducibility pin, not a claim of compatibility with every Click release.
 - Qwen3-ASR validates or supplies text but is not a timestamp source. MFA alone
   determines final phone timing; Qwen3 Forced Aligner is not used.
 - The accepted Qwen evidence is environment-deviant: it came from an isolated
@@ -43,8 +53,9 @@ Known limitations:
   below 2 because NumPy 2 removed `np.sctypes`, and `setuptools==59.8.0` for
   Chainer compatibility.
 - No automatic model download, environment creation, or global-cache cleanup
-  is performed. GPU/CPU policy must be explicit through preflight
-  configuration.
+  is performed. By default the worker follows the probed CUDA availability and
+  falls back to CPU; set `JAPANMFA_REQUIRE_CUDA=1` when CPU execution is not
+  allowed.
 - English or Japanese-English mixed utterances are outside this version and
   are skipped. Mixed-language handling is a future scope item; batch isolation
   means other utterances continue.

@@ -38,22 +38,39 @@ def _is_symbol(surface: str) -> bool:
     return any(unicodedata.category(character).startswith("S") for character in surface)
 
 
-def _processing_projection(original: str) -> tuple[str, tuple[int, ...]]:
-    """Return Task 2's processing text and each processing character's source index."""
-    source_indices: list[int] = []
+def _processing_projection(original: str) -> tuple[str, tuple[tuple[int, int], ...]]:
+    """Return NFC processing text and source spans for every output character.
+
+    NFC can compose multiple source code points into one output code point.
+    Build normalization clusters first so each output character retains the
+    complete original ``[start, end)`` span of the cluster that produced it.
+    """
+    source_units = [
+        (index, character)
+        for index, character in enumerate(original)
+        if character not in "\r\n"
+    ]
+    clusters: list[list[tuple[int, str]]] = []
+    for unit in source_units:
+        if clusters and unicodedata.combining(unit[1]) != 0:
+            clusters[-1].append(unit)
+        else:
+            clusters.append([unit])
+
     characters: list[str] = []
-    for index, character in enumerate(original):
-        if character in "\r\n":
-            continue
-        source_indices.append(index)
-        characters.append(character)
+    source_spans: list[tuple[int, int]] = []
+    for cluster in clusters:
+        normalized = unicodedata.normalize("NFC", "".join(item[1] for item in cluster))
+        source_span = (cluster[0][0], cluster[-1][0] + 1)
+        characters.extend(normalized)
+        source_spans.extend([source_span] * len(normalized))
 
     joined = "".join(characters)
     left_trimmed = len(joined) - len(joined.lstrip())
     right_trimmed = len(joined.rstrip())
     return (
         joined[left_trimmed:right_trimmed],
-        tuple(source_indices[left_trimmed:right_trimmed]),
+        tuple(source_spans[left_trimmed:right_trimmed]),
     )
 
 
@@ -104,7 +121,7 @@ class JapaneseFrontend:
 
     def analyze(self, text: SourceText) -> tuple[Token, ...]:
         """Validate and tokenize one source text into pronounced tokens."""
-        processing = text.processing
+        processing = unicodedata.normalize("NFC", text.processing)
         if _ASCII_LATIN_RE.search(processing):
             raise _skip(
                 "ASCII Latin letters are outside the supported Japanese frontend scope",
@@ -228,7 +245,7 @@ def _map_token_spans(
     original: str, tokens: tuple[Token, ...]
 ) -> tuple[tuple[Token, tuple[int, int]], ...]:
     """Map processing-copy token spans to original-text character spans."""
-    processing, source_indices = _processing_projection(original)
+    processing, source_spans = _processing_projection(original)
     mapped: list[tuple[Token, tuple[int, int]]] = []
     previous_end = 0
     for token in tokens:
@@ -258,8 +275,8 @@ def _map_token_spans(
                 end=token.end,
             )
         try:
-            original_start = source_indices[token.start]
-            original_end = source_indices[token.end - 1] + 1
+            original_start = source_spans[token.start][0]
+            original_end = source_spans[token.end - 1][1]
         except IndexError as exc:
             raise _span_failure(
                 "processing token span cannot be mapped to original text",
@@ -267,7 +284,9 @@ def _map_token_spans(
                 start=token.start,
                 end=token.end,
             ) from exc
-        if original[original_start:original_end].replace("\r", "").replace("\n", "") != token.surface:
+        original_surface = original[original_start:original_end]
+        original_surface = original_surface.replace("\r", "").replace("\n", "")
+        if unicodedata.normalize("NFC", original_surface) != token.surface:
             raise _span_failure(
                 "original text cannot reproduce the processing token",
                 token_index=token.index,

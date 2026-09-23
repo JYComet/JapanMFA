@@ -14,6 +14,14 @@ from japanmfa.errors import StageFailure
 runner = CliRunner()
 
 
+def test_public_cli_help_renders_without_typer_click_errors() -> None:
+    for arguments in (["--help"], ["run", "--help"], ["run-file", "--help"]):
+        result = runner.invoke(app, arguments)
+
+        assert result.exit_code == 0, result.exception
+        assert "Usage:" in result.output
+
+
 def _config(path: Path) -> None:
     path.write_text("asr:\n  language: Japanese\n", encoding="utf-8")
 

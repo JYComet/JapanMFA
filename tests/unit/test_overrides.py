@@ -63,6 +63,30 @@ def test_override_uses_original_character_coordinates_with_linebreaks(tmp_path: 
     assert changed[1].reading == "キョウ"
 
 
+def test_override_accepts_complete_nfc_token_span_in_decomposed_original(
+    tmp_path: Path,
+) -> None:
+    overrides = load_reading_overrides(
+        write_yaml(
+            tmp_path,
+            """utterances:
+  u1:
+    readings:
+      - span: [0, 2]
+        surface: が
+        kana: カ
+""",
+        )
+    )
+    tokens = (token(0, 0, 1, "が"), token(1, 1, 2, "な", "ナ"))
+
+    changed = apply_reading_overrides("u1", "がな", tokens, overrides)
+
+    assert changed[0].reading == "カ"
+    assert changed[0].reading_source == "override"
+    assert changed[1] == tokens[1]
+
+
 def test_override_fails_when_original_cannot_reproduce_processing_tokens(tmp_path: Path) -> None:
     overrides = load_reading_overrides(
         write_yaml(

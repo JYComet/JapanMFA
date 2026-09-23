@@ -3,21 +3,49 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 
+_TRUE_ENV_VALUES = frozenset({"1", "true", "yes"})
+
+
+def _cuda_required() -> bool:
+    return os.environ.get("JAPANMFA_REQUIRE_CUDA", "0").casefold() in _TRUE_ENV_VALUES
+
+
+def _model_source(model_name: str) -> str:
+    configured = os.environ.get("JAPANMFA_ASR_MODEL_PATH")
+    if not configured:
+        return model_name
+    path = Path(configured).expanduser()
+    if not path.is_dir():
+        raise ValueError("JAPANMFA_ASR_MODEL_PATH must point to an existing model directory")
+    return str(path)
+
+
 def _load_model(model_name: str) -> Any:
     """Load Qwen only inside the worker process, never in the orchestrator."""
+    model_source = _model_source(model_name)
     import torch
     from qwen_asr import Qwen3ASRModel
 
+    if torch.cuda.is_available():
+        dtype = torch.bfloat16
+        device_map = "cuda:0"
+    else:
+        if _cuda_required():
+            raise RuntimeError("CUDA is required by JAPANMFA_REQUIRE_CUDA but unavailable")
+        dtype = torch.float32
+        device_map = "cpu"
     return Qwen3ASRModel.from_pretrained(
-        model_name,
-        dtype=torch.bfloat16,
-        device_map="cuda:0",
+        model_source,
+        dtype=dtype,
+        device_map=device_map,
+        local_files_only=True,
         max_inference_batch_size=32,
         max_new_tokens=256,
     )

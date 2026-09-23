@@ -8,6 +8,7 @@ dependencies:
   - ffmpeg=7.1
   - pip:
       - PyYAML==6.0.2
+      - click==8.1.8
       - praatio==6.2.0
       - sudachipy==0.6.10
       - sudachidict-core==20260723

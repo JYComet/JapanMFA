@@ -2,9 +2,16 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 
 from japanmfa.domain import UtteranceOutcome
-from japanmfa.output.reports import append_manifest, summarize, write_json
+from japanmfa.output.reports import (
+    append_manifest,
+    redact_command,
+    summarize,
+    write_json,
+    write_yaml,
+)
 
 
 def test_write_json_is_unicode_sorted_atomic_and_secret_safe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,6 +73,31 @@ def test_write_json_redacts_embedded_sensitive_keys_recursively(tmp_path: Path) 
     for secret in ("client-secret", "bearer-secret", "api-secret", "nested-secret"):
         assert secret not in raw
     assert "keep-this" in raw
+
+
+def test_write_yaml_is_atomic_unicode_sorted_and_secret_safe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HF_TOKEN", "do-not-write-this-secret")
+    path = tmp_path / "nested" / "resolved_config.yaml"
+
+    write_yaml(
+        path,
+        {"z": "日本語", "a": 1, "credentials": {"token": "do-not-write-this-secret"}},
+    )
+
+    raw = path.read_text(encoding="utf-8")
+    assert raw.endswith("\n")
+    assert "do-not-write-this-secret" not in raw
+    assert yaml.safe_load(raw) == {
+        "a": 1,
+        "credentials": "[REDACTED]",
+        "z": "日本語",
+    }
+
+
+def test_redact_command_hides_separate_and_equals_secret_options() -> None:
+    assert redact_command(
+        ("worker", "--token", "literal-private-value", "--password=hunter2", "safe")
+    ) == ["worker", "--token", "<redacted>", "--password=<redacted>", "safe"]
 
 
 def test_manifest_and_summary_group_outcomes_stably(tmp_path: Path) -> None:

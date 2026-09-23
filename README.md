@@ -35,7 +35,17 @@ mfa model download g2p japanese_mfa
 The ASR model is local and is selected by `JAPANMFA_ASR_MODEL_PATH`, or by the
 standard Hugging Face cache under `HF_HOME`. The default is
 `Qwen/Qwen3-ASR-1.7B`; `Qwen/Qwen3-ASR-0.6B` may be configured as a fallback.
-No implicit model download happens during `check` or `run`.
+When `JAPANMFA_ASR_MODEL_PATH` is set, the worker loads that existing directory
+instead of the request's Hugging Face model identifier; an invalid explicit path
+fails before model loading. No implicit model download happens during `check` or
+`run`.
+
+The worker and `japanmfa check` use the same device policy. With
+`JAPANMFA_REQUIRE_CUDA=1` (also `true` or `yes`), CUDA must be available and the
+worker uses `cuda:0` with `bfloat16`. Without that setting, an available CUDA
+device uses the same GPU policy; otherwise the worker falls back to CPU with
+`float32` and `device_map=cpu`. The preflight report probes this path and emits
+`cuda_available` or `cpu_fallback` accordingly.
 
 tdmelodic is built separately from the project-owned
 [`tools/Dockerfile.tdmelodic`](tools/Dockerfile.tdmelodic). The wrapper requires
@@ -139,8 +149,9 @@ silently retries by changing the source.
 
 | status/check | reason codes | operator action |
 |---|---|---|
-| preflight pass | `ok`, `not_required` | Continue only when the report overall is OK. |
+| preflight pass | `ok` | Continue only when the report overall is OK. |
 | preflight runtime/command | `executable_missing`, `runtime_unavailable`, `command_failed`, `command_timeout`, `cuda_probe_failed`, `cuda_unavailable` | Activate the named isolated runtime, verify the configured argv and GPU policy, then rerun `japanmfa check`. |
+| preflight Qwen device policy | `cuda_available`, `cpu_fallback` | Continue with the reported Qwen device path; set `JAPANMFA_REQUIRE_CUDA=1` if CPU fallback is not permitted. |
 | preflight MFA version/model | `mfa_version_unparseable`, `mfa_version_incompatible`, `model_unavailable` | Use MFA 3.x and install/register the configured Japanese acoustic and G2P models. |
 | preflight tdmelodic/path | `probe_malformed`, `path_not_writable` | Verify strict `sy2a(surface,yomi)` output and choose writable project-owned paths. |
 | skipped input | `unsupported_japanese_text`, `non_japanese_language`, `unsupported_language` | Keep the skip, supply Japanese text/audio, or document it as out of scope; no output TextGrid is published. |

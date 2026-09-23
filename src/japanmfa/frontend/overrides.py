@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
+import unicodedata
 from typing import Mapping
 
 import yaml
@@ -118,7 +119,9 @@ def apply_reading_overrides(
                 {"utterance_id": utterance_id, "span": [start, end]},
             )
         previous_end = end
-        if original[start:end] != override.surface:
+        if unicodedata.normalize("NFC", original[start:end]) != unicodedata.normalize(
+            "NFC", override.surface
+        ):
             raise StageFailure(
                 "frontend",
                 "override_surface_mismatch",
@@ -137,7 +140,10 @@ def apply_reading_overrides(
             for token, (mapped_start, mapped_end) in mapped_tokens
             if mapped_start == start and mapped_end == end
         ]
-        if len(matches) != 1 or matches[0].surface != override.surface:
+        if (
+            len(matches) != 1
+            or unicodedata.normalize("NFC", override.surface) != matches[0].surface
+        ):
             raise StageFailure(
                 "frontend",
                 "override_requires_complete_token",

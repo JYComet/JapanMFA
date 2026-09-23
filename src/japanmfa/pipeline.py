@@ -6,21 +6,34 @@ import shutil
 import stat
 import json
 import hashlib
+import importlib.metadata
 import os
+import platform
+import sys
+import tempfile
 import time
 import traceback
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from .accent.parser import parse_accent
-from .accent.tdmelodic import AccentRequest, TdmelodicClient
+from .accent.tdmelodic import AccentRequest, TdmelodicClient, resolve_tdmelodic_command
 from .asr.qwen3 import ASRResult, Qwen3ASRClient
 from .audio import AudioInfo, AudioNormalizer
 from .cache import StageCache, stage_fingerprint
 from .config import PipelineConfig
 from .corpus import discover_utterances, load_source_text
-from .domain import Mora, Pronunciation, SourceText, Token, Utterance, UtteranceOutcome
+from .domain import (
+    Mora,
+    PhoneAnnotation,
+    Pronunciation,
+    SourceText,
+    Token,
+    Utterance,
+    UtteranceOutcome,
+)
 from .errors import SkipUtterance, StageFailure
 from .frontend.japanese import JapaneseFrontend, render_locked_kana
 from .frontend.mora import segment_morae
@@ -34,7 +47,14 @@ from .mfa.lexicon import LockedLexicon
 from .mfa.phone_map import PhoneMap
 from .mfa.runner import MfaRunner
 from .mfa.textgrid import MfaAlignment, parse_mfa_textgrid
-from .output.reports import _redact_string, append_manifest, summarize, write_json
+from .output.reports import (
+    _redact_string,
+    append_manifest,
+    redact_command,
+    summarize,
+    write_json,
+    write_yaml,
+)
 from .output.textgrid import validate_five_tier_textgrid, write_five_tier_textgrid
 from .projection import project_annotations
 
@@ -49,7 +69,9 @@ class BatchResult:
 
 
 def _source_from_asr(text: str) -> SourceText:
-    processing = text.replace("\r\n", "").replace("\n", "").replace("\r", "").strip()
+    processing = unicodedata.normalize(
+        "NFC", text.replace("\r\n", "").replace("\n", "").replace("\r", "").strip()
+    )
     return SourceText(original=text, processing=processing, source="asr")
 
 
@@ -68,6 +90,166 @@ def _valid_audio_artifact(path: Path) -> bool:
     except OSError:
         return False
     return not path.is_symlink() and stat.S_ISREG(metadata.st_mode) and metadata.st_size > 0
+
+
+def _reject_symlink_components(path: Path) -> None:
+    """Reject symlinks in a path before any caller creates or writes below it."""
+    absolute = Path(path).absolute()
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current /= part
+        try:
+            metadata = current.lstat()
+        except FileNotFoundError:
+            break
+        except OSError as exc:
+            raise ValueError(f"could not inspect output path: {current}: {exc}") from exc
+        if stat.S_ISLNK(metadata.st_mode):
+            raise ValueError(f"output path cannot contain symlink components: {current}")
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+    """Return whether either resolved path contains the other."""
+    return first == second or first in second.parents or second in first.parents
+
+
+def _safe_output_path(root: Path, relative: str | Path) -> Path:
+    """Return a path proven to remain below the project-owned output root."""
+    trusted_root = Path(root).absolute()
+    relative_path = Path(relative)
+    if relative_path.is_absolute() or any(part in {"", ".", ".."} for part in relative_path.parts):
+        raise ValueError(f"output relative path is invalid: {relative_path}")
+    candidate = trusted_root.joinpath(relative_path)
+    _reject_symlink_components(candidate)
+    try:
+        resolved_root = trusted_root.resolve(strict=True)
+        resolved_candidate = candidate.resolve(strict=False)
+    except OSError as exc:
+        raise ValueError(f"could not resolve output path: {candidate}: {exc}") from exc
+    if resolved_candidate != resolved_root and resolved_root not in resolved_candidate.parents:
+        raise ValueError(f"output path escapes trusted output root: {candidate}")
+    return candidate
+
+
+def _ensure_output_directory(root: Path, relative: str | Path = ".") -> Path:
+    directory = Path(root).absolute() if str(relative) == "." else _safe_output_path(root, relative)
+    _reject_symlink_components(directory)
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise ValueError(f"could not create output directory: {directory}: {exc}") from exc
+    _reject_symlink_components(directory)
+    if not directory.is_dir():
+        raise ValueError(f"output path is not a directory: {directory}")
+    resolved_root = Path(root).absolute().resolve(strict=True)
+    resolved_directory = directory.resolve(strict=True)
+    if resolved_directory != resolved_root and resolved_root not in resolved_directory.parents:
+        raise ValueError(f"output directory escapes trusted output root: {directory}")
+    return directory
+
+
+def _unlink_published(path: Path) -> None:
+    """Remove one published output without ever following a symlink."""
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return
+    if stat.S_ISLNK(metadata.st_mode) or stat.S_ISREG(metadata.st_mode):
+        path.unlink()
+        return
+    raise OSError(f"published output is not a regular file: {path}")
+
+
+def _cleanup_published_outputs(paths: tuple[Path, ...]) -> None:
+    """Remove every published final, reporting the first cleanup failure."""
+    first_error: OSError | None = None
+    for path in paths:
+        try:
+            _unlink_published(path)
+        except OSError as exc:
+            if first_error is None:
+                first_error = exc
+    if first_error is not None:
+        raise first_error
+
+
+def _published_cleanup_error(paths: tuple[Path, ...]) -> str | None:
+    """Best-effort cleanup for exception paths while preserving batch isolation."""
+    try:
+        _cleanup_published_outputs(paths)
+    except OSError as exc:
+        return str(exc)
+    return None
+
+
+def _publish_final_outputs(
+    artifact_dir: Path,
+    final_grid: Path,
+    final_alignment: Path,
+    duration: float,
+    source: str,
+    kana: str,
+    annotations: tuple[PhoneAnnotation, ...],
+    silence_labels: frozenset[str],
+) -> None:
+    """Validate both final artifacts in a private dir, then publish with a marker."""
+    complete_marker = artifact_dir / ".japanmfa.complete"
+    published = (final_grid, final_alignment, complete_marker)
+    for path in published:
+        _reject_symlink_components(path)
+    _cleanup_published_outputs(published)
+
+    staging = Path(tempfile.mkdtemp(prefix=".publish-", dir=artifact_dir))
+    staged_grid = staging / final_grid.name
+    staged_alignment = staging / final_alignment.name
+    staged_marker = staging / complete_marker.name
+    try:
+        write_five_tier_textgrid(staged_grid, duration, source, kana, annotations)
+        validate_five_tier_textgrid(staged_grid, duration, silence_labels)
+        write_json(
+            staged_alignment,
+            {
+                "textgrid": str(final_grid),
+                "duration": duration,
+                "phones": [
+                    {
+                        "start": item.interval.start,
+                        "end": item.interval.end,
+                        "label": item.interval.label,
+                        "kana": item.kana_label,
+                        "tone": item.tone_label,
+                        "token_index": item.token_index,
+                        "silence": item.is_silence,
+                    }
+                    for item in annotations
+                ],
+            },
+        )
+        if not _valid_audio_artifact(staged_grid) or not _valid_audio_artifact(staged_alignment):
+            raise OSError("staged final output is missing or not a regular non-empty file")
+        try:
+            json.loads(staged_alignment.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise OSError("staged alignment.json is not valid JSON") from exc
+
+        os.replace(staged_grid, final_grid)
+        os.replace(staged_alignment, final_alignment)
+        write_json(
+            staged_marker,
+            {"textgrid": str(final_grid), "alignment": str(final_alignment)},
+        )
+        if not _valid_audio_artifact(staged_marker):
+            raise OSError("staged completion marker is missing")
+        os.replace(staged_marker, complete_marker)
+    except BaseException:
+        cleanup_error = _published_cleanup_error(published)
+        if cleanup_error is not None:
+            raise OSError(
+                f"failed to remove partial final outputs: {cleanup_error}"
+            )
+        raise
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def _token_payload(tokens: tuple[Token, ...]) -> list[dict[str, object]]:
@@ -96,6 +278,120 @@ def _mora_payload(morae: Mapping[int, tuple[Mora, ...]]) -> list[dict[str, objec
         }
         for token_index, values in sorted(morae.items())
     ]
+
+
+def _audit_text(value: str) -> str:
+    """Normalize text for ASR comparison without changing the source artifact."""
+    return unicodedata.normalize("NFKC", value).replace("\r\n", "").replace("\n", "").replace("\r", "").strip()
+
+
+def _asr_comparison(source: SourceText, asr_result: ASRResult | None) -> dict[str, object]:
+    if source.source != "txt":
+        return {"performed": False, "reason": "no_authoritative_text"}
+    if asr_result is None:
+        return {"performed": False, "reason": "asr_result_unavailable"}
+    authoritative = _audit_text(source.original)
+    asr_text = _audit_text(asr_result.text)
+    equal = authoritative == asr_text
+    return {
+        "performed": True,
+        "normalization": "NFKC; remove CR/LF; trim surrounding whitespace",
+        "authoritative_normalized": authoritative,
+        "asr_normalized": asr_text,
+        "equal": equal,
+        "difference": None if equal else {
+            "authoritative": authoritative,
+            "asr": asr_text,
+        },
+    }
+
+
+def _package_versions() -> dict[str, str]:
+    packages = (
+        ("japanmfa", "japanmfa"),
+        ("PyYAML", "PyYAML"),
+        ("praatio", "praatio"),
+        ("sudachipy", "SudachiPy"),
+        ("sudachidict_core", "sudachidict_core"),
+        ("typer", "typer"),
+    )
+    versions: dict[str, str] = {}
+    for label, distribution in packages:
+        try:
+            versions[label] = importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            versions[label] = "unavailable"
+    return versions
+
+
+def _resolved_config_payload(
+    config: PipelineConfig,
+    input_root: Path,
+    output_root: Path,
+    utterance_count: int,
+    limit: int | None,
+    tdmelodic_command: tuple[str, ...],
+) -> dict[str, object]:
+    asr_model_path = os.environ.get("JAPANMFA_ASR_MODEL_PATH")
+    require_cuda_raw = os.environ.get("JAPANMFA_REQUIRE_CUDA", "0")
+    require_cuda = require_cuda_raw.casefold() in {"1", "true", "yes"}
+    return {
+        "japanmfa": {
+            "version": __import__("japanmfa").__version__,
+            "python": platform.python_version(),
+            "python_executable": sys.executable,
+        },
+        "dependencies": _package_versions(),
+        "config": {
+            "asr": {
+                "model": config.asr.model,
+                "fallback_model": config.asr.fallback_model,
+                "language": config.asr.language,
+            },
+            "mfa": {
+                "acoustic_model": config.mfa.acoustic_model,
+                "g2p_model": config.mfa.g2p_model,
+            },
+            "audio": {"sample_rate": config.audio.sample_rate},
+            "commands": {
+                "ffmpeg": redact_command(config.commands.ffmpeg),
+                "asr_worker": redact_command(config.commands.asr_worker),
+                "mfa": redact_command(config.commands.mfa),
+                "tdmelodic": redact_command(tdmelodic_command),
+            },
+            "paths": {
+                "cache_dir": str(Path(config.paths.cache_dir).resolve()),
+                "output_dir": str(output_root),
+            },
+            "validation": {"silence_labels": list(config.validation.silence_labels)},
+        },
+        "models": {
+            "asr": {
+                "configured_id": config.asr.model,
+                "model_path": asr_model_path,
+            },
+            "asr_fallback": {"configured_id": config.asr.fallback_model},
+            "mfa_acoustic": config.mfa.acoustic_model,
+            "mfa_g2p": config.mfa.g2p_model,
+        },
+        "device_policy": {
+            "require_cuda": require_cuda,
+            "configured_value": require_cuda_raw,
+            "selection": "cuda_required" if require_cuda else "cuda_if_available_else_cpu",
+        },
+        "commands": {
+            "ffmpeg": redact_command(config.commands.ffmpeg),
+            "asr_worker": redact_command(config.commands.asr_worker),
+            "mfa": redact_command(config.commands.mfa),
+            "tdmelodic": redact_command(tdmelodic_command),
+        },
+        "paths": {
+            "input_root": str(input_root),
+            "output_root": str(output_root),
+            "cache_dir": str(Path(config.paths.cache_dir).resolve()),
+        },
+        "batch": {"utterance_count": utterance_count, "limit": limit},
+    }
 
 
 def _adapter_id(adapter: object) -> str:
@@ -199,7 +495,7 @@ class JapanMFAPipeline:
         audio = self.audio_normalizer or AudioNormalizer(self.config)
         asr = self.asr_client or Qwen3ASRClient(self.config.commands.asr_worker, self.config.asr.model)
         frontend = self.frontend or JapaneseFrontend()
-        accent = self.accent_client or TdmelodicClient(("tdmelodic",))
+        accent = self.accent_client or TdmelodicClient(resolve_tdmelodic_command())
         g2p = self.g2p_client or MfaG2pClient(self.config.commands.mfa, self.config.mfa.g2p_model)
         phone_map = self.phone_map or PhoneMap.load(
             Path(__file__).parent / "mfa" / "data" / "japanese_mfa_v3_phone_map.yaml"
@@ -222,29 +518,56 @@ class JapanMFAPipeline:
         limit: int | None = None,
     ) -> BatchResult:
         input_root = Path(input_root).resolve()
-        output_root = Path(output_root).resolve()
-        if input_root == output_root or input_root in output_root.parents:
-            raise ValueError("output root must not be identical to or nested inside input root")
+        requested_output_root = Path(output_root).absolute()
+        _reject_symlink_components(requested_output_root)
+        output_root = requested_output_root.resolve(strict=False)
+        if _paths_overlap(input_root, output_root):
+            raise ValueError("output root must not overlap input root")
         if not input_root.is_dir():
             raise ValueError(f"input root is not a directory: {input_root}")
+
+        configured_cache_root = getattr(
+            self.cache, "root", self.config.paths.cache_dir
+        )
+        requested_cache_root = Path(configured_cache_root).absolute()
+        _reject_symlink_components(requested_cache_root)
+        cache_root = requested_cache_root.resolve(strict=False)
+        if _paths_overlap(input_root, cache_root):
+            raise ValueError("cache root must not overlap input root")
+        if _paths_overlap(output_root, cache_root):
+            raise ValueError("cache root must not overlap output root")
+
         utterances = discover_utterances(input_root)
         if limit is not None:
             if limit <= 0:
                 raise ValueError("limit must be a positive integer")
             utterances = utterances[:limit]
         override_set = ReadingOverrideSet({}) if overrides is None else load_reading_overrides(Path(overrides).resolve())
-        cache = self.cache or StageCache(Path(self.config.paths.cache_dir).resolve())
-        output_root.mkdir(parents=True, exist_ok=True)
-        manifest_path = output_root / "manifest.jsonl"
+        cache = self.cache or StageCache(cache_root)
+        _ensure_output_directory(output_root)
+        for utterance in utterances:
+            # Preflight every path before writing resolved config or invoking
+            # MFA, including nested speaker/utterance components.
+            _safe_output_path(output_root, utterance.utterance_id)
+        tdmelodic_command = resolve_tdmelodic_command()
+        write_yaml(
+            _safe_output_path(output_root, "resolved_config.yaml"),
+            _resolved_config_payload(self.config, input_root, output_root, len(utterances), limit, tdmelodic_command),
+        )
+        manifest_path = _safe_output_path(output_root, "manifest.jsonl")
         if manifest_path.exists():
             manifest_path.unlink()
         outcomes: list[UtteranceOutcome] = []
         for utterance in utterances:
             outcome = self._run_utterance(utterance, output_root, override_set, cache)
             outcomes.append(outcome)
-            append_manifest(manifest_path, outcome)
+            append_manifest(
+                manifest_path,
+                outcome,
+                source_type="txt" if utterance.text_path is not None else "asr",
+            )
         summary = summarize(outcomes)
-        summary_path = output_root / "summary.json"
+        summary_path = _safe_output_path(output_root, "summary.json")
         write_json(summary_path, summary)
         return BatchResult(tuple(outcomes), manifest_path, summary_path, output_root, summary)
 
@@ -256,10 +579,25 @@ class JapanMFAPipeline:
         cache: StageCache,
     ) -> UtteranceOutcome:
         started = time.monotonic()
-        artifact_dir = output_root / utterance.utterance_id
-        artifact_dir.mkdir(parents=True, exist_ok=True)
+        artifact_dir = _ensure_output_directory(output_root, utterance.utterance_id)
+        final_grid = _safe_output_path(
+            artifact_dir, f"{Path(utterance.audio_path).stem}.TextGrid"
+        )
+        final_alignment = _safe_output_path(artifact_dir, "alignment.json")
+        complete_marker = _safe_output_path(artifact_dir, ".japanmfa.complete")
+        published_outputs = (final_grid, final_alignment, complete_marker)
         durations: dict[str, float] = {}
         current_stage = "audio"
+        cleanup_error = _published_cleanup_error(published_outputs)
+        if cleanup_error is not None:
+            return UtteranceOutcome(
+                utterance.utterance_id,
+                "failed",
+                "final_cleanup_failed",
+                f"could not remove stale final outputs: {cleanup_error}",
+                artifact_dir,
+                {"output_cleanup": time.monotonic() - started},
+            )
         try:
             audio, asr, frontend, accent, g2p, mfa, phone_map = self._defaults(artifact_dir)
 
@@ -287,8 +625,8 @@ class JapanMFAPipeline:
             cached_audio = cache.directory("audio", audio_fp) / "audio.wav"
             if not cached_audio.is_file():
                 raise StageFailure("audio", "cache_artifact_missing", "cached working audio is missing")
-            working_audio = artifact_dir / "work" / "audio.wav"
-            working_audio.parent.mkdir(parents=True, exist_ok=True)
+            working_dir = _ensure_output_directory(artifact_dir, "work")
+            working_audio = _safe_output_path(working_dir, "audio.wav")
             shutil.copy2(cached_audio, working_audio)
             audio_info = AudioInfo(
                 utterance.audio_path,
@@ -354,7 +692,7 @@ class JapanMFAPipeline:
             asr_result = None if asr_payload is None else ASRResult(audio_info.working_path, str(asr_payload["language"]), str(asr_payload["text"]), str(asr_payload["model"]))
             durations["source"] = time.monotonic() - stage_started
             write_json(
-                artifact_dir / "asr.json",
+                _safe_output_path(artifact_dir, "asr.json"),
                 {
                     "model": None if asr_result is None else asr_result.model,
                     "language": None if asr_result is None else asr_result.language,
@@ -362,6 +700,7 @@ class JapanMFAPipeline:
                     "source": source.source,
                     "authoritative_text": source.original,
                     "validation": "not_run" if asr_result is None else "language_checked",
+                    "comparison": _asr_comparison(source, asr_result),
                 },
             )
 
@@ -369,7 +708,12 @@ class JapanMFAPipeline:
             stage_started = time.monotonic()
             frontend_fp = stage_fingerprint(
                 "frontend",
-                {"source": source_payload, "overrides": _adapter_id(override_set), "adapter": _adapter_id(frontend)},
+                {
+                    "utterance_id": utterance.utterance_id,
+                    "source": source_payload,
+                    "overrides": _adapter_id(override_set),
+                    "adapter": _adapter_id(frontend),
+                },
             )
 
             def produce_frontend(_path: Path) -> dict[str, object]:
@@ -381,7 +725,7 @@ class JapanMFAPipeline:
             tokens = _tokens_from_payload(frontend_payload["tokens"])
             kana = str(frontend_payload["kana"])
             durations["frontend"] = time.monotonic() - stage_started
-            write_json(artifact_dir / "frontend.json", {"tokens": _token_payload(tokens), "original": source.original, "kana": kana})
+            write_json(_safe_output_path(artifact_dir, "frontend.json"), {"tokens": _token_payload(tokens), "original": source.original, "kana": kana})
 
             current_stage = "accent"
             stage_started = time.monotonic()
@@ -402,7 +746,7 @@ class JapanMFAPipeline:
             toned_morae = _morae_from_payload(accent_payload["morae"])
             marked = dict(accent_payload["tdmelodic"])
             durations["accent"] = time.monotonic() - stage_started
-            write_json(artifact_dir / "mora.json", {"morae": _mora_payload(toned_morae), "tdmelodic": marked})
+            write_json(_safe_output_path(artifact_dir, "mora.json"), {"morae": _mora_payload(toned_morae), "tdmelodic": marked})
 
             current_stage = "g2p"
             stage_started = time.monotonic()
@@ -415,21 +759,27 @@ class JapanMFAPipeline:
             g2p_payload = cache.load_or_run("g2p", g2p_fp, produce_g2p)
             pronunciations = tuple(Pronunciation(str(item["reading"]), tuple(str(phone) for phone in item["phones"])) for item in g2p_payload["pronunciations"])
             lexicon = LockedLexicon.build(utterance.utterance_id, tokens, pronunciations)
-            mfa_root = artifact_dir / "mfa"
-            corpus_dir = mfa_root / "corpus"
-            dictionary_path = mfa_root / "dictionary.dict"
+            mfa_root = _ensure_output_directory(artifact_dir, "mfa")
+            corpus_dir = _ensure_output_directory(mfa_root, "corpus")
+            dictionary_path = _safe_output_path(mfa_root, "dictionary.dict")
+            _safe_output_path(corpus_dir, f"{utterance.utterance_id}.lab")
+            _safe_output_path(corpus_dir, "aliases.json")
             lexicon.write(corpus_dir, dictionary_path)
-            corpus_audio = corpus_dir / f"{utterance.utterance_id}.wav"
+            corpus_audio = _safe_output_path(corpus_dir, f"{utterance.utterance_id}.wav")
             corpus_audio.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(audio_info.working_path, corpus_audio)
             durations["g2p"] = time.monotonic() - stage_started
 
             current_stage = "mfa"
             stage_started = time.monotonic()
-            raw_grid = mfa.align(corpus_dir, dictionary_path, mfa_root / "aligned", mfa_root / "work")
+            mfa_output = _safe_output_path(mfa_root, "aligned")
+            mfa_work = _safe_output_path(mfa_root, "work")
+            _reject_symlink_components(mfa_output)
+            _reject_symlink_components(mfa_work)
+            raw_grid = mfa.align(corpus_dir, dictionary_path, mfa_output, mfa_work)
             alignment = parse_mfa_textgrid(Path(raw_grid), frozenset(self.config.validation.silence_labels))
             durations["mfa"] = time.monotonic() - stage_started
-            write_json(artifact_dir / "mfa.json", {"textgrid": str(raw_grid), "aliases": list(lexicon.aliases), "transcript": lexicon.transcript})
+            write_json(_safe_output_path(artifact_dir, "mfa.json"), {"textgrid": str(raw_grid), "aliases": list(lexicon.aliases), "transcript": lexicon.transcript})
 
             current_stage = "projection"
             stage_started = time.monotonic()
@@ -438,41 +788,59 @@ class JapanMFAPipeline:
 
             current_stage = "output"
             stage_started = time.monotonic()
-            final_grid = artifact_dir / f"{Path(utterance.audio_path).stem}.TextGrid"
             duration = _duration(audio_info, alignment)
-            write_five_tier_textgrid(final_grid, duration, source.original, kana, annotations)
-            validate_five_tier_textgrid(final_grid, duration, frozenset(self.config.validation.silence_labels))
-            write_json(
-                artifact_dir / "alignment.json",
-                {
-                    "textgrid": str(final_grid),
-                    "duration": duration,
-                    "phones": [
-                        {
-                            "start": item.interval.start,
-                            "end": item.interval.end,
-                            "label": item.interval.label,
-                            "kana": item.kana_label,
-                            "tone": item.tone_label,
-                            "token_index": item.token_index,
-                            "silence": item.is_silence,
-                        }
-                        for item in annotations
-                    ],
-                },
+            _publish_final_outputs(
+                artifact_dir,
+                final_grid,
+                final_alignment,
+                duration,
+                source.original,
+                kana,
+                annotations,
+                frozenset(self.config.validation.silence_labels),
             )
             durations["output"] = time.monotonic() - stage_started
             return UtteranceOutcome(utterance.utterance_id, "aligned", None, None, artifact_dir, durations)
         except SkipUtterance as exc:
+            cleanup_error = _published_cleanup_error(published_outputs)
             durations[current_stage] = durations.get(current_stage, time.monotonic() - started)
+            if cleanup_error is not None:
+                return UtteranceOutcome(
+                    utterance.utterance_id,
+                    "failed",
+                    "final_cleanup_failed",
+                    f"could not remove final outputs after skip: {cleanup_error}",
+                    artifact_dir,
+                    durations,
+                )
             return UtteranceOutcome(utterance.utterance_id, "skipped", exc.reason_code, exc.message, None, durations)
         except StageFailure as exc:
+            cleanup_error = _published_cleanup_error(published_outputs)
             durations[current_stage] = durations.get(current_stage, time.monotonic() - started)
+            if cleanup_error is not None:
+                return UtteranceOutcome(
+                    utterance.utterance_id,
+                    "failed",
+                    "final_cleanup_failed",
+                    f"could not remove final outputs after failure: {cleanup_error}",
+                    artifact_dir,
+                    durations,
+                )
             return UtteranceOutcome(utterance.utterance_id, "failed", exc.reason_code, exc.message, artifact_dir, durations)
         except Exception as exc:  # per-item isolation boundary
+            cleanup_error = _published_cleanup_error(published_outputs)
             durations[current_stage] = durations.get(current_stage, time.monotonic() - started)
-            trace_path = artifact_dir / "traceback.txt"
+            trace_path = _safe_output_path(artifact_dir, "traceback.txt")
             trace_path.write_text(_redact_string(traceback.format_exc()), encoding="utf-8")
+            if cleanup_error is not None:
+                return UtteranceOutcome(
+                    utterance.utterance_id,
+                    "failed",
+                    "final_cleanup_failed",
+                    f"could not remove final outputs after exception: {cleanup_error}",
+                    artifact_dir,
+                    {**durations, "traceback": 0.0},
+                )
             return UtteranceOutcome(
                 utterance.utterance_id,
                 "failed",

@@ -69,6 +69,24 @@ def test_projection_keeps_one_long_phone_boundary_and_composes_mora_tones() -> N
     assert annotations[0].tone_label == "H|L"
 
 
+def test_projection_assigns_distinct_morae_to_distinct_long_vowel_phones() -> None:
+    lexicon = _lexicon("オー", ("o", "o"))
+    alignment = _alignment((("o", 0.25, 0.5, False), ("o", 0.5, 0.75, False)))
+
+    annotations = project_annotations(
+        alignment, lexicon, {0: _morae(("オ", "H"), ("ー", "L"))}, PHONE_MAP
+    )
+
+    assert [(item.kana_label, item.tone_label) for item in annotations] == [
+        ("オ", "H"),
+        ("ー", "L"),
+    ]
+    assert [tuple((mora.kana, mora.tone) for mora in item.morae) for item in annotations] == [
+        (("オ", "H"),),
+        (("ー", "L"),),
+    ]
+
+
 def test_projection_supports_palatalized_mora_n_and_sokuon() -> None:
     cases = (
         ("キョ", ("k", "jo"), ("キョ",)),

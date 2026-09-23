@@ -18,7 +18,7 @@ results remain below as discovery history, not as the final acceptance result.
   write, rename, copy-over, or delete was performed.
 - The read-only inventory contains 5 `.wav` files and 0 `.txt` files. The
   five runs therefore use the Qwen result as the authoritative text input.
-- The authoritative acceptance output is under `runs/0922jap-full-final2/`;
+- The authoritative acceptance output is under `runs/0922jap-full-final3/`;
   discovery outputs are under `runs/0922jap-smoke2/` and
   `runs/0922jap-full/`. Runtime state and caches are under
   `/home/user/JapanMFA/.runtime`.
@@ -52,6 +52,12 @@ markers are accepted (`ト]` maps to `H`, and `タ[チ]` maps to `L,H`), trailin
 conflicting rows fail, and MFA validation uses `--ignore_acoustics`,
 per-utterance `--temporary_directory`, and `--clean`.
 
+Final review fixes included multiline TextGrid handling, frontend-cache
+isolation, `mora_spans`, atomic completion markers, consistent Qwen and
+tdmelodic selection in `run` and `check`, NFC normalization, the audit
+contract, validation of every aligned output, cache/input/output path
+isolation, and Click 8.1.8 compatibility locking.
+
 ## Preflight
 
 Command: `japanmfa check --config /tmp/japanmfa-real-config.yaml`.
@@ -59,7 +65,7 @@ Command: `japanmfa check --config /tmp/japanmfa-real-config.yaml`.
 `/tmp/japanmfa-real-config.yaml` was generated as a temporary configuration
 for this run.
 
-All 10 checks passed in **21.11 s**:
+All 10 checks passed in **25.09 s**:
 
 | check | result |
 |---|---|
@@ -69,28 +75,29 @@ All 10 checks passed in **21.11 s**:
 | Japanese MFA G2P model | PASS |
 | Qwen runtime import | PASS |
 | Qwen model cache | PASS |
-| Qwen CUDA probe | PASS; CUDA available in the ASR runtime |
+| Qwen CUDA probe | PASS (`cuda_available`); CUDA available in the ASR runtime |
 | tdmelodic probe | PASS; `sy2a(surface, yomi)` round-tripped the locked reading |
 | output path writeability | PASS |
 | cache path writeability | PASS |
 
-Successful preflight reason codes are `ok`; the CUDA check may report
-`not_required` when the explicit CUDA requirement is disabled. The probes use
+Successful preflight reason codes are `ok` and `cuda_available`; this run's
+Qwen device reason is `cuda_available`. The worker uses the same Qwen and
+tdmelodic command selection and device decision as the probe. The probes use
 bounded subprocesses and project-owned temporary paths.
 
 ## Batch results
 
 | run | role / command scope | elapsed | aligned | failed | skipped | reason codes |
 |---|---|---:|---:|---:|---:|---|
-| `runs/0922jap-full-final2/` | authoritative, all 5 WAV files | 1:41.01 | 2 | 3 | 0 | `unknown_phone` (3) |
+| `runs/0922jap-full-final3/` | authoritative, all 5 WAV files | 1:47.21 | 2 | 3 | 0 | `unknown_phone` (3) |
 | `runs/0922jap-smoke2/` | discovery history, `--limit 3` | 3:12.83 | 1 | 2 | 0 | `malformed_output` (1), `unknown_phone` (1) |
 | `runs/0922jap-full/` | discovery history, all 5 WAV files | 6:59.55 | 2 | 3 | 0 | `malformed_output` (1), `unknown_phone` (2) |
 
 The machine-readable summaries are
-`runs/0922jap-full-final2/summary.json`,
+`runs/0922jap-full-final3/summary.json`,
 `runs/0922jap-smoke2/summary.json`, and `runs/0922jap-full/summary.json`;
-per-item records are in the corresponding `manifest.jsonl` files. Final2 is
-the authoritative batch result.
+per-item records are in the corresponding `manifest.jsonl` files. Final3 is
+the authoritative batch result; it also contains `resolved_config.yaml`.
 
 ## Representative aligned outputs
 
@@ -98,29 +105,31 @@ Both aligned items passed final five-tier validation. The tier order is
 `original`, `kana`, `phones`, `phone_kana`, `phone_tone`; lower tiers retain
 the MFA phone boundaries exactly.
 
-- `runs/0922jap-full-final2/角色__v_liv__v_liv_03/角色__v_liv__v_liv_03.TextGrid`
+- `runs/0922jap-full-final3/角色__v_liv__v_liv_03/角色__v_liv__v_liv_03.TextGrid`
   contains 5 tiers, 1 non-silence phone (`a`), and tone `L`.
-- `runs/0922jap-full-final2/角色__v_liv__v_liv_04/角色__v_liv__v_liv_04.TextGrid`
+- `runs/0922jap-full-final3/角色__v_liv__v_liv_04/角色__v_liv__v_liv_04.TextGrid`
   contains 5 tiers, 6 non-silence phones, exact lower-tier boundary equality,
   and phone tones `L L H H H H`.
 
 The accompanying traceable evidence is in each item's `alignment.json`,
 `frontend.json`, `mora.json`, and `mfa.json` files. The first item also has the
-same evidence under `runs/0922jap-full-final2/角色__v_liv__v_liv_03/`.
+same evidence under `runs/0922jap-full-final3/角色__v_liv__v_liv_03/`.
+Each aligned item additionally has a `.japanmfa.complete` marker. The audit
+contract and every aligned item's audit files were validated together with the
+five-tier output.
 
 ## Failed items and reason codes
 
 | item | result | evidence and observed cause |
 |---|---|---|
-| `角色__v_liv__v_liv_01` | failed, `unknown_phone` | After the trailing-marker parser change, the item progressed through accent parsing, G2P, and MFA, then failed phone-map projection. Raw dictionary phones were `ɕ i c i k a ɴ / ɾʲ iː ɸ ɯ / t o / m o ɯ ɕ i / m a s ɨ / c i tː o / j a k ɯ / ɲ i / t a tɕ i / m a s ɨ`. Evidence: `runs/0922jap-full-final2/角色__v_liv__v_liv_01/mfa/dictionary.dict`, `mfa.json`, and `mora.json`. |
-| `角色__v_liv__v_liv_02` | failed, `unknown_phone` | MFA emitted `h a i`; projection could not accept `i` because it is absent from the pinned phone map. Evidence: `runs/0922jap-full-final2/角色__v_liv__v_liv_02/mfa/dictionary.dict`, `mfa.json`, and `mora.json`. |
-| `角色__v_liv__v_liv_05` | failed, `unknown_phone` | Raw MFA phones were `tɕ i ɡ a i m a s ɨ`; normalized phones were `tɕ i g a i m a s ɨ`. The pinned map is missing `tɕ`, `i`, `g`, `m`, and `ɨ`. Evidence: `runs/0922jap-full-final2/角色__v_liv__v_liv_05/mfa/dictionary.dict`, `mfa.json`, and `mora.json`. |
+| `角色__v_liv__v_liv_01` | failed, `unknown_phone` | After the trailing-marker parser change, the item progressed through accent parsing, G2P, and MFA, then failed phone-map projection. Raw dictionary phones were `ɕ i c i k a ɴ / ɾʲ iː ɸ ɯ / t o / m o ɯ ɕ i / m a s ɨ / c i tː o / j a k ɯ / ɲ i / t a tɕ i / m a s ɨ`. Evidence: `runs/0922jap-full-final3/角色__v_liv__v_liv_01/mfa/dictionary.dict`, `mfa.json`, and `mora.json`. |
+| `角色__v_liv__v_liv_02` | failed, `unknown_phone` | MFA emitted `h a i`; projection could not accept `i` because it is absent from the pinned phone map. Evidence: `runs/0922jap-full-final3/角色__v_liv__v_liv_02/mfa/dictionary.dict`, `mfa.json`, and `mora.json`. |
+| `角色__v_liv__v_liv_05` | failed, `unknown_phone` | Raw MFA phones were `tɕ i ɡ a i m a s ɨ`; normalized phones were `tɕ i g a i m a s ɨ`. The pinned map is missing `tɕ`, `i`, `g`, `m`, and `ɨ`. Evidence: `runs/0922jap-full-final3/角色__v_liv__v_liv_05/mfa/dictionary.dict`, `mfa.json`, and `mora.json`. |
 
-The authoritative final2 batch reason-code inventory is `unknown_phone` (3).
-The preflight also reports `ok`, or `not_required` when the configured CUDA
-policy does not require a GPU. The discovery runs retain `malformed_output` as
-historical evidence only. Batch isolation kept all failures from stopping the
-sibling utterances.
+The authoritative final3 batch reason-code inventory is `unknown_phone` (3).
+The preflight reason for Qwen is `cuda_available`. The discovery runs retain
+`malformed_output` as historical evidence only. Batch isolation kept all
+failures from stopping the sibling utterances.
 
 ## Real-model tests and verification state
 
@@ -132,7 +141,8 @@ sibling utterances.
   real MFA runtime/model check.
 - `pytest -m real_models tests/integration/test_real_pipeline.py -v` passed
   against the existing-output pipeline evidence.
-- The default full suite was **204 passed, 4 skipped** at final evidence
+- Real combination tests: **15 passed in 38.71 s**.
+- The default full suite was **238 passed, 4 skipped** at final evidence
   capture.
 
 ## Follow-up

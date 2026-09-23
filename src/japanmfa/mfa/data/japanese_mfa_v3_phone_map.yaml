@@ -21,6 +21,7 @@ rules:
     phones: [o]
   - kana: [オ, ー]
     phones: [o, o]
+    mora_spans: [[0, 1], [1, 2]]
   - kana: [ハ]
     phones: [h, a]
   - kana: [レ]

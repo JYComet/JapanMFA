@@ -1,5 +1,6 @@
 """Read-only discovery and text loading for Japanese corpus inputs."""
 
+import unicodedata
 from pathlib import Path
 
 from .domain import SourceText, Utterance
@@ -77,5 +78,7 @@ def load_source_text(path: Path) -> SourceText:
 
     if decoded.startswith("\ufeff"):
         decoded = decoded[1:]
-    processing = decoded.replace("\r\n", "").replace("\n", "").replace("\r", "").strip()
+    processing = unicodedata.normalize(
+        "NFC", decoded.replace("\r\n", "").replace("\n", "").replace("\r", "").strip()
+    )
     return SourceText(original=decoded, processing=processing, source="txt")

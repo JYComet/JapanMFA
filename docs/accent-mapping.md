@@ -20,6 +20,12 @@ For each MFA phone:
 - one contributing mora broadcasts its kana and tone;
 - multiple phones from one mora repeat that mora's labels;
 - a phone spanning multiple morae uses ordered labels, e.g. `オ|ー` and `H|L`;
+- when a phone-map rule has the same number of morae and phones, ranges are
+  paired one-to-one in order (for example, `オ,ー -> o,o` maps to `オ` then
+  `ー`, preserving `H` then `L`);
+- a rule with multiple morae and multiple phones of unequal cardinality must
+  declare an explicit `mora_spans` list of half-open `[start, end]` ranges;
+  the loader rejects such a rule when the ranges are absent or invalid;
 - silence has empty `phone_kana` and `phone_tone` labels;
 - no internal boundary is fabricated inside a single MFA interval.
 

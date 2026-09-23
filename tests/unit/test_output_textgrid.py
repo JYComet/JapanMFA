@@ -5,6 +5,7 @@ from japanmfa.output.textgrid import (
     validate_five_tier_textgrid,
     write_five_tier_textgrid,
 )
+from japanmfa.output import textgrid as textgrid_module
 
 
 def _annotations() -> tuple[PhoneAnnotation, ...]:
@@ -63,6 +64,19 @@ def test_textgrid_round_trips_quotes_with_praat_doubled_quote_syntax(tmp_path: P
     assert 'text = "原""文"' in text
     assert 'text = "p""q"' in text
     assert '\\"' not in text
+
+
+def test_textgrid_round_trips_multiline_original_with_crlf_and_trailing_newline(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "multiline-original.TextGrid"
+    original = '第一行\r\n第二行\n末尾\n"引号"\r\n'
+
+    write_five_tier_textgrid(path, 1.0, original, "カナ", (_annotations()[0],))
+    validate_five_tier_textgrid(path, 1.0, frozenset())
+
+    _, _, tiers = textgrid_module._parse(path)
+    assert tiers[0].intervals[0].label == original
 
 
 def test_textgrid_rejects_wrong_declared_tier_size(tmp_path: Path) -> None:

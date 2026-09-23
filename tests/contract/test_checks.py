@@ -264,6 +264,50 @@ def test_cuda_unavailable_fails_only_when_cpu_is_explicitly_disallowed(
     assert "install" in check.action.lower() or "cpu" in check.action.lower()
 
 
+@pytest.mark.parametrize(
+    ("cuda_value", "reason_code"),
+    [("1", "cuda_available"), ("0", "cpu_fallback")],
+)
+def test_cuda_policy_reports_the_runtime_path_when_cpu_is_allowed(
+    tmp_path: Path, monkeypatch, cuda_value: str, reason_code: str
+) -> None:
+    fake = _fake(tmp_path)
+    monkeypatch.setenv("FAKE_CUDA", cuda_value)
+    monkeypatch.delenv("JAPANMFA_REQUIRE_CUDA", raising=False)
+
+    report = run_preflight(_config(tmp_path, fake))
+
+    check = _names(report)["qwen_cuda"]
+    assert check.ok
+    assert check.reason_code == reason_code
+
+
+def test_cuda_probe_failure_is_reported_even_when_cpu_is_allowed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    fake = _fake(tmp_path)
+    monkeypatch.delenv("JAPANMFA_REQUIRE_CUDA", raising=False)
+
+    def fake_run(command, *, input_text=None, timeout):
+        argv = tuple(command)
+        if any("cuda.is_available" in part for part in argv):
+            return "not-a-boolean\n", "", 0, None
+        if "version" in argv:
+            return "3.3.9\n", "", 0, None
+        if "model" in argv:
+            return "model present\n", "", 0, None
+        if "--help" in argv:
+            return "Usage: fake\n", "", 0, None
+        return "ニホンゴ\n", "", 0, None
+
+    monkeypatch.setattr("japanmfa.checks._run", fake_run)
+    report = run_preflight(_config(tmp_path, fake))
+
+    check = _names(report)["qwen_cuda"]
+    assert not check.ok
+    assert check.reason_code == "cuda_probe_failed"
+
+
 def test_malformed_tdmelodic_probe_is_typed(tmp_path: Path, monkeypatch) -> None:
     fake = _fake(tmp_path)
     monkeypatch.setenv("JAPANMFA_TDMELODIC_COMMAND", f"{sys.executable} {fake} tdmelodic")

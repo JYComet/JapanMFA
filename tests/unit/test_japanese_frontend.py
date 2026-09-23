@@ -74,6 +74,10 @@ def frontend() -> JapaneseFrontend:
             FakeMorpheme("・", 3, "・", ("補助記号",)),
             FakeMorpheme("晴れ", 4, "ハレ", ("名詞",)),
         ],
+        "がな": [
+            FakeMorpheme("が", 0, "ガ", ("名詞",)),
+            FakeMorpheme("な", 1, "ナ", ("名詞",)),
+        ],
         "日本語★": [
             FakeMorpheme("日本語", 0, "ニホンゴ", ("名詞",)),
             FakeMorpheme("★", 3, "ホシ", ("記号",)),
@@ -170,6 +174,21 @@ def test_render_locked_kana_maps_processing_spans_to_original_and_preserves_line
     processing = "今日は晴れ"
     tokens = frontend.analyze(SourceText(original=original, processing=processing, source="txt"))
     assert render_locked_kana(original, tokens) == " \r\nキョウハ\r\nハレ  \r\n"
+
+
+def test_nfc_processing_maps_decomposed_original_clusters_and_preserves_gaps(
+    frontend: JapaneseFrontend,
+) -> None:
+    original = " \r\nか\u3099な\r\n"
+    tokens = frontend.analyze(
+        SourceText(original=original, processing="か\u3099な", source="txt")
+    )
+
+    assert [(token.start, token.end, token.surface) for token in tokens] == [
+        (0, 1, "が"),
+        (1, 2, "な"),
+    ]
+    assert render_locked_kana(original, tokens) == " \r\nガナ\r\n"
 
 
 def test_render_locked_kana_rejects_original_that_cannot_reproduce_processing(

@@ -36,6 +36,19 @@ def test_source_text_preserves_original_and_normalizes_processing_copy(tmp_path:
     assert text.source == "txt"
 
 
+def test_source_text_nfc_normalizes_decomposed_japanese_without_changing_original(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "decomposed.txt"
+    original = " \r\nか\u3099な\r\n"
+    path.write_text(original, encoding="utf-8", newline="")
+
+    text = load_source_text(path)
+
+    assert text.original == original
+    assert text.processing == "がな"
+
+
 def test_discovery_is_deterministic_and_ignores_unsupported_extensions(tmp_path: Path) -> None:
     corpus = tmp_path / "corpus"
     touch_wav(corpus / "z.wav")

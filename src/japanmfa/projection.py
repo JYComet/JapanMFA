@@ -74,7 +74,9 @@ def _match_morae_to_phones(
                 if normalized[phone_index:phone_end] != rule.phones:
                     continue
                 group = tuple(morae[mora_index:mora_end])
-                mapping = state.mapping + (group,) * len(rule.phones)
+                mapping = state.mapping + tuple(
+                    group[start:end] for start, end in rule.mora_spans
+                )
                 candidate = _Match(state.cost + rule.cost, state.count, mapping)
                 states[(mora_end, phone_end)] = _better(states.get((mora_end, phone_end)), candidate)
 

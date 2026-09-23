@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
 from japanmfa.errors import StageFailure
+
+
+def resolve_tdmelodic_command(raw: str | None = None) -> tuple[str, ...]:
+    """Resolve the shared argv configuration used by run and preflight."""
+    configured = os.environ.get("JAPANMFA_TDMELODIC_COMMAND", "tdmelodic") if raw is None else raw
+    try:
+        command = tuple(shlex.split(configured))
+    except ValueError as exc:
+        raise ValueError("tdmelodic command configuration is malformed") from exc
+    if not command:
+        raise ValueError("tdmelodic command configuration is empty")
+    return command
 
 
 @dataclass(frozen=True)
