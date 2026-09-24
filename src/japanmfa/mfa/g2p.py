@@ -143,7 +143,7 @@ class MfaG2pClient:
                 error=str(exc),
             ) from exc
 
-        by_reading: dict[str, Pronunciation] = {}
+        by_reading: dict[str, list[tuple[str, ...]]] = {}
         for line_number, raw_line in enumerate(output.splitlines(), start=1):
             line = raw_line.strip()
             if not line:
@@ -157,16 +157,10 @@ class MfaG2pClient:
                     line=raw_line,
                 )
             reading, phone_text = columns
-            pronunciation = Pronunciation(reading, tuple(phone_text.split()))
-            if reading in by_reading:
-                if by_reading[reading] == pronunciation:
-                    continue
-                raise _failure(
-                    "multiple_pronunciations",
-                    f"MFA G2P returned multiple pronunciations for {reading!r}",
-                    reading=reading,
-                )
-            by_reading[reading] = pronunciation
+            phones = tuple(phone_text.split())
+            candidates = by_reading.setdefault(reading, [])
+            if phones not in candidates:
+                candidates.append(phones)
 
         requested_set = set(requested)
         unexpected = sorted(set(by_reading) - requested_set)
@@ -184,4 +178,4 @@ class MfaG2pClient:
                 readings=missing,
             )
 
-        return tuple(by_reading[reading] for reading in requested)
+        return tuple(Pronunciation(reading, by_reading[reading][0], tuple(by_reading[reading][1:])) for reading in requested)

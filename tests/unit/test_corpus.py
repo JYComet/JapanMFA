@@ -103,3 +103,19 @@ def test_discovery_associates_existing_sidecar_text(tmp_path: Path) -> None:
 
     assert utterance.audio_path == audio
     assert utterance.text_path == text
+
+
+def test_discovery_accepts_ogg_with_reference_and_rejects_duplicate_stem(tmp_path: Path) -> None:
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "line.ogg").write_bytes(b"OggS")
+    (corpus / "line.txt").write_text("世界、大丈夫？", encoding="utf-8")
+    utterance = discover_utterances(corpus)[0]
+    assert utterance.utterance_id == "line"
+    assert utterance.audio_path.suffix == ".ogg"
+    assert utterance.text_path == corpus / "line.txt"
+
+    touch_wav(corpus / "line.wav")
+    with pytest.raises(StageFailure) as exc_info:
+        discover_utterances(corpus)
+    assert exc_info.value.reason_code == "duplicate_utterance_id"

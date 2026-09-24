@@ -40,7 +40,8 @@ def test_ffmpeg_contract_uses_safe_argument_array_and_publishes_working_audio(
     assert "-ac" in argv and argv[argv.index("-ac") + 1] == "1"
     assert "-ar" in argv and argv[argv.index("-ar") + 1] == "16000"
     assert "-c:a" in argv and argv[argv.index("-c:a") + 1] == "pcm_s16le"
-    assert str(source) in argv
+    assert any(str(source) in value for value in argv)
+    assert str(destination.with_suffix(".native.partial.wav")) in argv
     partial = destination.with_suffix(".partial.wav")
     assert str(partial) in argv
     assert destination.exists()

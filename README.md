@@ -96,7 +96,7 @@ tdmelodic argv-like command and `JAPANMFA_ASR_MODEL_PATH` to a local model
 directory when those are not discoverable from the defaults.
 
 ```bash
-japanmfa run-file /path/to/001.wav --text /path/to/001.txt --output runs/one
+japanmfa run-file /path/to/001.ogg --text /path/to/001.txt --output runs/one
 japanmfa run --input /mnt/Raw/0922jap --output runs/0922jap-smoke --limit 3
 japanmfa run --input /mnt/Raw/0922jap --output runs/0922jap-full
 japanmfa inspect runs/0922jap-full/manifest.jsonl
@@ -110,20 +110,23 @@ skipped with a reason code; one item failing does not stop the batch.
 
 ## Output
 
-Each aligned utterance contains a validated five-tier Praat TextGrid and JSON
+Each aligned utterance contains a validated six-tier Praat TextGrid and JSON
 audit artifacts. The tiers are exactly:
 
-1. `original` — original source text, one interval covering the complete audio;
-2. `kana` — complete locked katakana, one interval covering the complete audio;
-3. `phones` — MFA phone intervals, including silence;
-4. `phone_kana` — kana projected onto the exact MFA phone intervals;
-5. `phone_tone` — `HH / LL / HL / LH` projected from the contributing morae.
+1. `original` — original source text with a leading `<sp1>`, one interval covering the complete audio;
+2. `kana` — complete locked katakana with a leading `<sp1>`, one interval covering the complete audio;
+3. `words` — MFA word intervals with source punctuation replacing real silent gaps;
+4. `phones` — MFA phone intervals, including silence;
+5. `phone_kana` — kana projected onto the exact MFA phone intervals;
+6. `phone_tone` — `HH / LL / HL / LH` projected from the contributing morae.
 
-Only the last three tiers share phone boundaries, including explicit silence.
-Bounded outer-edge acoustic refinements are audited in `postprocess.json`.
+The `words` tier preserves MFA word spans and places source punctuation on real pause spans. Only the last three tiers share phone boundaries, including explicit silence.
+Structural, short-phone, BGM, and word-energy checks are audited in `postprocess.json`; MFA phone boundaries remain fixed.
 A long phone spanning H then L morae is labeled `HL`; no
 invented internal boundary is created. See [input/output](docs/input-output.md),
 [architecture](docs/architecture.md), and [accent mapping](docs/accent-mapping.md).
+
+The [September 24 upstream postprocess test report](docs/test-report-upstream-postprocess-20260924.md) records both full seven-item modes, actual output checks, and unresolved model failures. The [historical regression applicability ledger](docs/upstream-regression-applicability-20260923.md) tracks the old project issues.
 
 The [September 23 boundary repair report](docs/test-report-boundary-tone-20260923.md)
 includes the original failure, applicable ASRMFA--Pure postprocessing, and
@@ -147,7 +150,7 @@ results.
 ## Status, reason codes, and recovery actions
 
 `check` prints one result per probe and exits 1 if any probe is not OK. `run`
-always isolates an utterance: `aligned` means all five tiers validated,
+always isolates an utterance: `aligned` means all six tiers validated,
 `skipped` means the input is outside the Japanese v1 scope, and `failed` means
 a supported item hit a typed stage/consistency error. Actions below are
 operator guidance only; the pipeline never downloads, guesses a reading, or

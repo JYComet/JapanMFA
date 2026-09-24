@@ -5,8 +5,8 @@ JapanMFA is a new repository and a Japanese-only pipeline. The old
 scope.
 
 ```text
-.wav + optional .txt
-  -> FFmpeg working copy / audio metadata
+.wav/.ogg + optional .txt
+  -> native-rate ASRMFA trim/edge normalization -> FFmpeg mono PCM16/16 kHz working copy
   -> Qwen3-ASR (Japanese, validation or text fallback)
   -> SudachiPy SplitMode.B + reading overrides
   -> mora segmentation
@@ -14,8 +14,8 @@ scope.
   -> Japanese MFA G2P + occurrence aliases + locked dictionary
   -> MFA v3 validate/align -> final phone intervals
   -> mora-to-phone projection
-  -> acoustic coverage / bounded edge refinement / one optional MFA retry
-  -> five-tier TextGrid + JSON/manifest/summary
+  -> immutable MFA phone projection + upstream structural/short-phone/BGM/word-energy QC
+  -> six-tier TextGrid + processed WAV + JSON/manifest/summary
 ```
 
 The Python 3.11 orchestrator owns discovery, validation, caching, projection,
@@ -34,14 +34,14 @@ orchestrator process.
   occurrence.
 - tdmelodic predicts accent from the locked reading but never changes it.
 - MFA G2P determines a single phone string for each occurrence alias. MFA
-  supplies phonetic boundaries; acoustic refinement can change only the two
-  outer speech edges, recording every change and preserving internal boundaries.
+  supplies phonetic boundaries; postprocessing never moves or splits those
+  boundaries. Uncovered gaps become canonical `<sp0>`–`<sp3>` owners.
 - Projection checks the expected phone sequence and can only annotate each
   actual MFA phone; it does not subdivide a phone.
-- A rejected coverage check may trigger one lossless mora-group MFA retry.
-  Long phones are never split, source-time offsets are restored, and the full
-  ordered phone sequence must remain identical.
-- Output is published only after acoustic and five-tier structural checks pass.
+- Structural and enabled QC failures are rejected without boundary mutation or
+  an MFA retry. CTC-timed energy refinement, Chinese word mutation, and CTC-gap
+  BGM checks remain explicitly blocked because their evidence is unavailable.
+- Output is published only after acoustic and six-tier structural checks pass.
 
 Each utterance has isolated artifacts and a manifest outcome (`aligned`,
 `skipped`, or `failed`). Expected `SkipUtterance`/`StageFailure` values are
@@ -50,7 +50,9 @@ are captured as a failed outcome with a diagnostic traceback path.
 
 ## Isolation and recovery
 
-The source corpus is read-only by policy. Working audio, MFA temporary files,
+The source corpus is read-only by policy. Native-rate processed audio, MFA temporary files,
 cache entries, and final output live in project-owned paths. Stage fingerprints
-include content and adapter/model identity; atomic publication prevents partial
-artifacts from being accepted as cached successes.
+include source content, trim settings, implementation revision, and adapter/model
+identity; atomic publication prevents partial artifacts from being accepted as
+cached successes. Final output includes a same-basename processed WAV and
+`audio.json` receipt whose hash matches the MFA working copy.

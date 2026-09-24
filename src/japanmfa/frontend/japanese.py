@@ -29,7 +29,7 @@ def normalize_katakana(value: str) -> str:
 def _is_punctuation(surface: str) -> bool:
     """Return whether every character is Unicode punctuation."""
     return bool(surface) and all(
-        unicodedata.category(character).startswith("P") for character in surface
+        (unicodedata.category(character).startswith("P") or character in "～〜") for character in surface
     )
 
 
@@ -180,6 +180,8 @@ class JapaneseFrontend:
                     {"surface": surface, "error": str(exc)},
                 ) from exc
 
+            if _is_punctuation(surface):
+                continue
             if _is_symbol(surface):
                 raise _skip(
                     "text contains an unsupported Unicode symbol",
@@ -187,8 +189,6 @@ class JapaneseFrontend:
                     start=start,
                     end=end,
                 )
-            if _is_punctuation(surface):
-                continue
             if not isinstance(raw_reading, str) or not raw_reading:
                 raise _skip(
                     "text contains an unpronounceable morpheme",

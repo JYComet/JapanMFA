@@ -236,3 +236,13 @@ def test_phone_contour_does_not_hide_internal_pitch_reversal() -> None:
     with pytest.raises(StageFailure) as error:
         labels_for_phone(_morae(("オ", "H"), ("ー", "L"), ("ー", "H")))
     assert error.value.reason_code == "unsupported_tone_contour"
+
+
+
+def test_projection_accepts_only_model_candidate_selected_by_mfa() -> None:
+    token = Token(0, 0, 1, "ア", ("名詞",), "ア", "override")
+    pronunciation = Pronunciation("ア", ("o",), (("a",),))
+    lexicon = LockedLexicon.build("utt", (token,), (pronunciation,))
+    alignment = _alignment((("a", 0.0, 1.0, False),))
+    annotations = project_annotations(alignment, lexicon, {0: _morae(("ア", "H"))}, PHONE_MAP)
+    assert [item.interval.label for item in annotations] == ["a"]

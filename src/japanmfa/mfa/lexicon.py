@@ -73,7 +73,7 @@ class LockedLexicon:
                     token_reading=token.reading,
                     pronunciation_reading=pronunciation.reading,
                 )
-            if not pronunciation.phones:
+            if not pronunciation.phones or any(not variant or not all(variant) for variant in pronunciation.alternates):
                 raise _failure(
                     "empty_pronunciation",
                     "each locked dictionary entry must contain at least one phone",
@@ -98,8 +98,9 @@ class LockedLexicon:
 
         lab_content = f"{self.transcript}\n" if self.transcript else ""
         dictionary_content = "".join(
-            f"{alias} {' '.join(pronunciation.phones)}\n"
+            f"{alias} {' '.join(phones)}\n"
             for alias, pronunciation in zip(self.aliases, self.pronunciations)
+            for phones in (pronunciation.phones, *pronunciation.alternates)
         )
 
         audit: dict[str, dict[str, object]] = {}
@@ -114,6 +115,8 @@ class LockedLexicon:
                     "morae": [mora.kana for mora in segment_morae(token)],
                     "phones": list(pronunciation.phones),
                 }
+                if pronunciation.alternates:
+                    audit[alias]["phone_variants"] = [list(variant) for variant in pronunciation.alternates]
             audit_content = json.dumps(
                 audit, ensure_ascii=False, indent=2, sort_keys=True
             ) + "\n"

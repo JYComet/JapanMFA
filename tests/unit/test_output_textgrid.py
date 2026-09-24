@@ -82,6 +82,12 @@ def test_textgrid_round_trips_multiline_original_with_crlf_and_trailing_newline(
     assert tiers[0].intervals[0].label == original
 
 
+def test_canonical_silence_labels_validate_with_legacy_config(tmp_path: Path) -> None:
+    path = tmp_path / "legacy.TextGrid"
+    write_five_tier_textgrid(path, 1.25, "<sp1>今日は", "<sp1>キョウハ", _annotations())
+    validate_five_tier_textgrid(path, 1.25, frozenset(("", "sil", "sp", "spn")))
+
+
 def test_textgrid_rejects_wrong_declared_tier_size(tmp_path: Path) -> None:
     path = tmp_path / "wrong-size.TextGrid"
     write_five_tier_textgrid(path, 1.0, "原", "カ", _annotations()[:1])
@@ -102,7 +108,7 @@ def test_export_explicitly_partitions_leading_internal_and_trailing_silence(tmp_
     for name in ("phones", "phone_kana", "phone_tone"):
         rows = grid.getTier(name).entries
         assert [(r.start, r.end) for r in rows] == [(0., .2), (.2, .4), (.4, .7), (.7, .9), (.9, 1.2)]
-        assert [r.label for r in rows[::2]] == ["", "", ""]
+        assert [r.label for r in rows[::2]] == ["<sp1>", "<sp1>", "<sp1>"]
     validate_five_tier_textgrid(path, 1.2, frozenset())
 
 

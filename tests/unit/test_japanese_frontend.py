@@ -231,3 +231,21 @@ def test_render_locked_kana_rejects_overlapping_or_mismatched_token_spans(fronte
     mismatched = (tokens[0].__class__(0, 0, 2, "別", ("名詞",), "ベツ", "sudachi"),)
     with pytest.raises(StageFailure, match="token_span_mismatch"):
         render_locked_kana("今日は晴れ", mismatched)
+
+
+def test_japanese_wave_dash_is_preserved_as_punctuation() -> None:
+    mode_b = object()
+    tokenizer = FakeTokenizer({
+        "世界～大丈夫": [
+            FakeMorpheme("世界", 0, "セカイ", ("名詞",)),
+            FakeMorpheme("～", 2, "～", ("補助記号",)),
+            FakeMorpheme("大丈夫", 3, "ダイジョウブ", ("名詞",)),
+        ]
+    })
+    dictionary = FakeDictionary(tokenizer, mode_b)
+    module = SimpleNamespace(Dictionary=lambda **kwargs: dictionary, SplitMode=SimpleNamespace(B=mode_b))
+    frontend = JapaneseFrontend(sudachi_module=module)
+    source = SourceText("世界～大丈夫", "世界～大丈夫", "txt")
+    tokens = frontend.analyze(source)
+    assert [token.surface for token in tokens] == ["世界", "大丈夫"]
+    assert render_locked_kana(source.original, tokens) == "セカイ～ダイジョウブ"

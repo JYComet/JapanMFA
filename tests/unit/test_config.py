@@ -50,3 +50,28 @@ def test_external_commands_are_argument_arrays(tmp_path: Path) -> None:
 
     assert config.commands.ffmpeg == ("ffmpeg",)
     assert config.commands.asr_worker == ("python", "worker.py")
+
+
+@pytest.mark.parametrize("value", [True, -0.1, float("nan"), float("inf")])
+def test_config_rejects_invalid_mfa_dither(tmp_path: Path, value: float) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text(f"mfa:\n  dither: {value!r}\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="mfa.dither"):
+        PipelineConfig.load(path)
+
+
+def test_config_defaults_mfa_dither_to_zero(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("mfa: {}\n", encoding="utf-8")
+    assert PipelineConfig.load(path).mfa.dither == 0.0
+
+
+def test_audio_preprocess_defaults_are_upstream_values() -> None:
+    config = PipelineConfig()
+    assert config.audio.max_silence_sec == 1.0
+    assert config.audio.sil_vol_threshold == .005
+    assert config.audio.sil_len_threshold == .08
+    assert config.audio.normalize_edges is True
+    assert config.audio.target_edge_silence_sec == .5
+    assert config.audio.edge_silence_threshold == .001
+    assert config.audio.edge_frame_length == 1024

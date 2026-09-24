@@ -16,7 +16,7 @@ from .errors import StageFailure
 from .pipeline import JapanMFAPipeline
 
 
-app = typer.Typer(help="Japanese-only MFA five-track forced alignment")
+app = typer.Typer(help="Japanese MFA alignment with word, phone, kana, and tone tiers")
 
 
 def _validate_roots(input_root: Path, output_root: Path) -> tuple[Path, Path]:
@@ -60,7 +60,7 @@ def run(
     overrides: Annotated[Path | None, typer.Option("--overrides", exists=True, dir_okay=False)] = None,
     limit: Annotated[int | None, typer.Option("--limit", min=1)] = None,
 ) -> None:
-    """Align every WAV discovered under INPUT."""
+    """Align every WAV or OGG discovered under INPUT."""
     try:
         _run(input_root, output_root, config, overrides, limit)
     except StageFailure as exc:
@@ -79,7 +79,7 @@ def run_file(
     config: Annotated[Path, typer.Option("--config", exists=True, dir_okay=False)] = Path("configs/default.yaml"),
     overrides: Annotated[Path | None, typer.Option("--overrides", exists=True, dir_okay=False)] = None,
 ) -> None:
-    """Align one WAV using a temporary one-item corpus manifest."""
+    """Align one WAV or OGG using a temporary one-item corpus manifest."""
     try:
         if not audio.is_file() or audio.is_dir():
             raise ValueError(f"audio must be a regular file: {audio}")

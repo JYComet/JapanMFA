@@ -8,7 +8,7 @@ from .errors import StageFailure
 
 
 def discover_utterances(root: Path) -> list[Utterance]:
-    """Discover lowercase ``.wav`` files in deterministic relative-path order.
+    """Discover lowercase ``.wav`` and ``.ogg`` files in deterministic relative-path order.
 
     The returned paths remain rooted at the caller-provided path.  Resolution is
     used only when reporting comparison details; discovery never writes to the
@@ -16,7 +16,7 @@ def discover_utterances(root: Path) -> list[Utterance]:
     """
     root = Path(root)
     candidates = sorted(
-        root.rglob("*.wav"),
+        (path for path in root.rglob("*") if path.suffix in {".wav", ".ogg"}),
         key=lambda path: path.relative_to(root).as_posix(),
     )
     utterances: list[Utterance] = []

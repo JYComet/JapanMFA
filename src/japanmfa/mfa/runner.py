@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import math
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -25,6 +26,7 @@ class MfaRunner:
         owned_root: Path,
         timeout: float | None = None,
         env: Mapping[str, str] | None = None,
+        dither: float = 0.0,
     ) -> None:
         if isinstance(command, (str, bytes)) or not command or not all(
             isinstance(part, str) and part for part in command
@@ -34,11 +36,14 @@ class MfaRunner:
             raise ValueError("model must be a non-empty string")
         if timeout is not None and timeout <= 0:
             raise ValueError("timeout must be positive")
+        if isinstance(dither, bool) or not isinstance(dither, (int, float)) or not math.isfinite(float(dither)) or dither < 0:
+            raise ValueError("dither must be finite and non-negative")
         self._owned_root = self._validate_owned_root(owned_root)
         self._command = tuple(command)
         self._model = model
         self._timeout = timeout
         self._env = None if env is None else {**os.environ, **dict(env)}
+        self._dither = float(dither)
 
     def _build_validate_command(self, corpus_dir: Path, dictionary: Path, work_dir: Path) -> list[str]:
         """Build the version-sensitive MFA 3.x validation invocation."""
@@ -71,6 +76,8 @@ class MfaRunner:
             str(work_dir),
             "--clean",
             "--no_tokenization",
+            "--dither",
+            format(self._dither, ".1f"),
         ]
 
     def validate(self, corpus_dir: Path, dictionary: Path, work_dir: Path) -> None:

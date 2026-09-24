@@ -47,8 +47,8 @@ def test_g2p_accepts_identical_duplicate_dictionary_rows(
     )
 
 
-def test_g2p_rejects_conflicting_duplicate_dictionary_rows(tmp_path: Path) -> None:
-    command = tmp_path / "conflicting_mfa.py"
+def test_g2p_preserves_distinct_model_pronunciation_candidates(tmp_path: Path) -> None:
+    command = tmp_path / "variant_mfa.py"
     command.write_text(
         "from pathlib import Path\n"
         "import sys\n"
@@ -58,12 +58,10 @@ def test_g2p_rejects_conflicting_duplicate_dictionary_rows(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    with pytest.raises(StageFailure) as exc_info:
-        MfaG2pClient((sys.executable, str(command))).pronounce(
-            ("キョウ",), tmp_path / "conflicting"
-        )
-
-    assert exc_info.value.reason_code == "multiple_pronunciations"
+    result = MfaG2pClient((sys.executable, str(command))).pronounce(
+        ("キョウ",), tmp_path / "variants"
+    )
+    assert result == (Pronunciation("キョウ", ("k", "jo", "N"), (("k", "a", "N"),)),)
 
 
 @pytest.mark.parametrize("mode", ["missing", "oov", "mismatch"])

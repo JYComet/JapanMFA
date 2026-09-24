@@ -69,3 +69,15 @@ def test_locked_lexicon_rejects_count_or_reading_mismatch(
         LockedLexicon.build("speaker/001", tokens, pronunciations)
 
     assert exc_info.value.stage == "mfa_g2p"
+
+
+
+def test_locked_lexicon_writes_all_model_pronunciation_variants(tmp_path: Path) -> None:
+    pronunciation = Pronunciation("キョウ", ("k", "jo", "N"), (("k", "o", "N"),))
+    lexicon = LockedLexicon.build("line", (token(0),), (pronunciation,))
+    dictionary = tmp_path / "dictionary.dict"
+    lexicon.write(tmp_path / "corpus", dictionary)
+    assert dictionary.read_text(encoding="utf-8") == (
+        "jmfa_000000 k jo N\n"
+        "jmfa_000000 k o N\n"
+    )

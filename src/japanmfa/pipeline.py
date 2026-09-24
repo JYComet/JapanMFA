@@ -48,7 +48,6 @@ from .mfa.g2p import MfaG2pClient
 from .mfa.lexicon import LockedLexicon
 from .mfa.phone_map import PhoneMap
 from .mfa.runner import MfaRunner
-from .mfa.recovery import build_recovery_units, restore_recovery_alignment
 from .mfa.textgrid import MfaAlignment, parse_mfa_textgrid
 from .output.reports import (
     _redact_string,
@@ -58,7 +57,7 @@ from .output.reports import (
     write_json,
     write_yaml,
 )
-from .output.textgrid import validate_five_tier_textgrid, write_five_tier_textgrid
+from .output.textgrid import build_word_intervals, validate_five_tier_textgrid, write_five_tier_textgrid
 from .projection import project_annotations
 from .postprocess import PostprocessResult, annotation_rows, postprocess_annotations
 
@@ -80,6 +79,8 @@ def _source_from_asr(text: str) -> SourceText:
 
 
 def _duration(audio: AudioInfo, alignment: MfaAlignment) -> float:
+    if audio.working_frames > 0 and audio.working_sample_rate > 0:
+        return audio.working_frames / audio.working_sample_rate
     if audio.duration > 0:
         return audio.duration
     positive_ends = [phone.end for phone in alignment.phones]
@@ -88,58 +89,23 @@ def _duration(audio: AudioInfo, alignment: MfaAlignment) -> float:
     raise StageFailure("audio", "duration_unavailable", "audio duration is not positive")
 
 
-def _recover_acoustic_coverage(
-    mfa: Any, artifact_dir: Path, audio: AudioInfo, duration: float,
-    annotations: tuple[PhoneAnnotation, ...], lexicon: LockedLexicon,
-    morae: dict[int, tuple[Mora, ...]], phone_map: PhoneMap,
-    silence: frozenset[str], initial: PostprocessResult,
-) -> PostprocessResult:
-    """One MFA retry with lossless mora groups, never fabricated timings."""
-    recovery: dict[str, object] = {"attempted": True, "accepted": False,
-                                   "requires_manual_review": True,
-                                   "original_attempt": initial.report}
-    try:
-        units = build_recovery_units(annotations, lexicon)
-        if len(units) <= len(lexicon.aliases):
-            raise StageFailure("recovery", "recovery_not_applicable", "no lossless within-token split available")
-        root = _ensure_output_directory(artifact_dir, "mfa/recovery")
-        corpus = _ensure_output_directory(root, "corpus")
-        output, work = _safe_output_path(root, "aligned"), _safe_output_path(root, "work")
-        dictionary = _safe_output_path(root, "dictionary.dict")
-        wav_path, lab_path = _safe_output_path(corpus, "clip.wav"), _safe_output_path(corpus, "clip.lab")
-        with wave.open(str(audio.working_path), "rb") as source:
-            rate = source.getframerate()
-            start_frame = max(0, math.floor((float(initial.report["activity_start"]) - .03) * rate))
-            end_frame = min(source.getnframes(), math.ceil((float(initial.report["activity_end"]) + .03) * rate))
-            source.setpos(start_frame)
-            payload = source.readframes(end_frame - start_frame)
-            with wave.open(str(wav_path), "wb") as destination:
-                destination.setparams(source.getparams())
-                destination.writeframes(payload)
-        offset = start_frame / rate
-        lab_path.write_text(" ".join(u.alias for u in units) + "\n", encoding="utf-8")
-        dictionary.write_text("".join(u.alias + "\t" + " ".join(u.phones) + "\n" for u in units), encoding="utf-8")
-        grid = mfa.align(corpus, dictionary, output, work)
-        recovery.update(raw_grid=str(grid), crop_start=offset, crop_end=end_frame / rate,
-                        units=[{"alias": u.alias, "original_alias": u.original_alias, "phones": list(u.phones)} for u in units])
-        restored = restore_recovery_alignment(parse_mfa_textgrid(Path(grid), silence), units, lexicon, offset)
-        candidate = project_annotations(restored, lexicon, morae, phone_map)
-        processed = postprocess_annotations(audio.working_path, duration, candidate)
-        if processed.report["passed"]:
-            recovery["accepted"] = True
-            return PostprocessResult(processed.annotations, {**processed.report, "recovery": recovery})
-        recovery["candidate_checks"] = processed.report
-    except (StageFailure, ValueError, OSError, wave.Error) as exc:
-        recovery.update(reason_code=getattr(exc, "reason_code", "recovery_failed"), message=str(exc))
-    return PostprocessResult(initial.annotations, {**initial.report, "recovery": recovery})
-
-
 def _valid_audio_artifact(path: Path) -> bool:
     try:
         metadata = path.stat()
     except OSError:
         return False
     return not path.is_symlink() and stat.S_ISREG(metadata.st_mode) and metadata.st_size > 0
+
+
+def _valid_working_audio(path: Path, sample_rate: int) -> bool:
+    if not _valid_audio_artifact(path):
+        return False
+    try:
+        with wave.open(str(path), "rb") as stream:
+            return (stream.getnchannels() == 1 and stream.getsampwidth() == 2
+                    and stream.getframerate() == sample_rate and stream.getnframes() > 0)
+    except (EOFError, OSError, wave.Error):
+        return False
 
 
 def _reject_symlink_components(path: Path) -> None:
@@ -241,10 +207,15 @@ def _publish_final_outputs(
     kana: str,
     annotations: tuple[PhoneAnnotation, ...],
     silence_labels: frozenset[str],
+    words: tuple[tuple[float, float, str], ...],
+    working_audio: Path,
+    audio_receipt: Mapping[str, object],
 ) -> None:
     """Validate both final artifacts in a private dir, then publish with a marker."""
     complete_marker = artifact_dir / ".japanmfa.complete"
-    published = (final_grid, final_alignment, complete_marker)
+    final_audio = artifact_dir / f"{final_grid.stem}.wav"
+    final_audio_json = artifact_dir / "audio.json"
+    published = (final_grid, final_alignment, final_audio, final_audio_json, complete_marker)
     for path in published:
         _reject_symlink_components(path)
     _cleanup_published_outputs(published)
@@ -252,9 +223,11 @@ def _publish_final_outputs(
     staging = Path(tempfile.mkdtemp(prefix=".publish-", dir=artifact_dir))
     staged_grid = staging / final_grid.name
     staged_alignment = staging / final_alignment.name
+    staged_audio = staging / final_audio.name
+    staged_audio_json = staging / final_audio_json.name
     staged_marker = staging / complete_marker.name
     try:
-        write_five_tier_textgrid(staged_grid, duration, source, kana, annotations)
+        write_five_tier_textgrid(staged_grid, duration, source, kana, annotations, words=words)
         validate_five_tier_textgrid(staged_grid, duration, silence_labels)
         write_json(
             staged_alignment,
@@ -262,11 +235,34 @@ def _publish_final_outputs(
                 "textgrid": str(final_grid),
                 "duration": duration,
                 "phones": annotation_rows(annotations),
+                "words": [{"start": start, "end": end, "label": label} for start, end, label in words],
                 "tone_encoding": "HH_LL_HL_LH",
                 "tone_source": "tdmelodic_predicted_mora_accent_not_measured_f0",
+                "audio": str(final_audio),
+                "audio_receipt": str(final_audio_json),
+                "audio_sha256": audio_receipt.get("working_sha256"),
+                "audio_frames": audio_receipt.get("working_frames"),
+                "audio_sample_rate": audio_receipt.get("working_sample_rate"),
             },
         )
-        if not _valid_audio_artifact(staged_grid) or not _valid_audio_artifact(staged_alignment):
+        receipt = dict(audio_receipt)
+        required_receipt = ("working_sample_rate", "working_frames", "working_sha256")
+        if any(key not in receipt for key in required_receipt):
+            raise OSError("audio receipt is incomplete")
+        shutil.copy2(working_audio, staged_audio)
+        write_json(staged_audio_json, receipt)
+        with wave.open(str(staged_audio), "rb") as audio_stream:
+            if (audio_stream.getnchannels() != 1 or audio_stream.getsampwidth() != 2
+                    or audio_stream.getframerate() != int(receipt["working_sample_rate"])
+                    or audio_stream.getnframes() != int(receipt["working_frames"])
+                    or abs(audio_stream.getnframes() / audio_stream.getframerate() - duration)
+                    > (1.0 / audio_stream.getframerate() + 1e-6)):
+                raise OSError("published WAV header does not match audio receipt or duration")
+        if hashlib.sha256(staged_audio.read_bytes()).hexdigest() != receipt["working_sha256"]:
+            raise OSError("published WAV hash does not match audio receipt")
+        required = [staged_grid, staged_alignment]
+        required.extend([staged_audio, staged_audio_json])
+        if not all(_valid_audio_artifact(path) for path in required):
             raise OSError("staged final output is missing or not a regular non-empty file")
         try:
             json.loads(staged_alignment.read_text(encoding="utf-8"))
@@ -275,9 +271,19 @@ def _publish_final_outputs(
 
         os.replace(staged_grid, final_grid)
         os.replace(staged_alignment, final_alignment)
+        os.replace(staged_audio, final_audio)
+        os.replace(staged_audio_json, final_audio_json)
         write_json(
             staged_marker,
-            {"textgrid": str(final_grid), "alignment": str(final_alignment)},
+            {
+                "textgrid": str(final_grid),
+                "alignment": str(final_alignment),
+                "audio": str(final_audio),
+                "audio_receipt": str(final_audio_json),
+                "duration": duration,
+                "working_sha256": receipt["working_sha256"],
+                "working_frames": receipt["working_frames"],
+            },
         )
         if not _valid_audio_artifact(staged_marker):
             raise OSError("staged completion marker is missing")
@@ -324,6 +330,25 @@ def _mora_payload(morae: Mapping[int, tuple[Mora, ...]]) -> list[dict[str, objec
 def _audit_text(value: str) -> str:
     """Normalize text for ASR comparison without changing the source artifact."""
     return unicodedata.normalize("NFKC", value).replace("\r\n", "").replace("\n", "").replace("\r", "").strip()
+
+
+def _with_sp1(value: str) -> str:
+    return value if value.startswith("<sp") else f"<sp1>{value}"
+
+
+def _punctuation_groups(value: str) -> tuple[str, ...]:
+    """Return source punctuation groups without treating Japanese ー as punctuation."""
+    groups: list[str] = []
+    current: list[str] = []
+    for character in value:
+        if unicodedata.category(character).startswith("P"):
+            current.append(character)
+        elif current:
+            groups.append("".join(current))
+            current = []
+    if current:
+        groups.append("".join(current))
+    return tuple(groups)
 
 
 def _asr_comparison(source: SourceText, asr_result: ASRResult | None) -> dict[str, object]:
@@ -392,8 +417,18 @@ def _resolved_config_payload(
             "mfa": {
                 "acoustic_model": config.mfa.acoustic_model,
                 "g2p_model": config.mfa.g2p_model,
+                "dither": config.mfa.dither,
             },
-            "audio": {"sample_rate": config.audio.sample_rate},
+            "audio": {
+                "sample_rate": config.audio.sample_rate,
+                "max_silence_sec": config.audio.max_silence_sec,
+                "sil_vol_threshold": config.audio.sil_vol_threshold,
+                "sil_len_threshold": config.audio.sil_len_threshold,
+                "normalize_edges": config.audio.normalize_edges,
+                "target_edge_silence_sec": config.audio.target_edge_silence_sec,
+                "edge_silence_threshold": config.audio.edge_silence_threshold,
+                "edge_frame_length": config.audio.edge_frame_length,
+            },
             "commands": {
                 "ffmpeg": redact_command(config.commands.ffmpeg),
                 "asr_worker": redact_command(config.commands.asr_worker),
@@ -404,7 +439,10 @@ def _resolved_config_payload(
                 "cache_dir": str(Path(config.paths.cache_dir).resolve()),
                 "output_dir": str(output_root),
             },
-            "validation": {"silence_labels": list(config.validation.silence_labels)},
+            "validation": {
+                "silence_labels": list(config.validation.silence_labels),
+                "enable_word_in_silence_filter": config.validation.enable_word_in_silence_filter,
+            },
         },
         "models": {
             "asr": {
@@ -547,6 +585,7 @@ class JapanMFAPipeline:
                 self.config.commands.mfa,
                 self.config.mfa.acoustic_model,
                 owned_root=artifact_dir / "mfa",
+                dither=self.config.mfa.dither,
             )
         return audio, asr, frontend, accent, g2p, mfa, phone_map
 
@@ -625,8 +664,10 @@ class JapanMFAPipeline:
             artifact_dir, f"{Path(utterance.audio_path).stem}.TextGrid"
         )
         final_alignment = _safe_output_path(artifact_dir, "alignment.json")
+        final_audio = _safe_output_path(artifact_dir, f"{Path(utterance.audio_path).stem}.wav")
+        final_audio_json = _safe_output_path(artifact_dir, "audio.json")
         complete_marker = _safe_output_path(artifact_dir, ".japanmfa.complete")
-        published_outputs = (final_grid, final_alignment, complete_marker)
+        published_outputs = (final_grid, final_alignment, final_audio, final_audio_json, complete_marker)
         durations: dict[str, float] = {}
         current_stage = "audio"
         cleanup_error = _published_cleanup_error(published_outputs)
@@ -645,7 +686,9 @@ class JapanMFAPipeline:
             stage_started = time.monotonic()
             audio_fp = stage_fingerprint(
                 "audio",
-                {"audio": utterance.audio_path, "sample_rate": self.config.audio.sample_rate, "adapter": _adapter_id(audio)},
+                {"audio": utterance.audio_path, "sample_rate": self.config.audio.sample_rate,
+                 "preprocess_revision": "asrmfa-trim-silence-v1",
+                 "preprocess": self.config.audio, "adapter": _adapter_id(audio)},
             )
 
             def produce_audio(path: Path) -> dict[str, object]:
@@ -655,13 +698,35 @@ class JapanMFAPipeline:
                     "source_sample_rate": info.source_sample_rate,
                     "source_channels": info.source_channels,
                     "working_sample_rate": info.working_sample_rate,
+                    "source_frames": info.source_frames,
+                    "working_frames": info.working_frames,
+                    "source_sha256": info.source_sha256,
+                    "working_sha256": info.working_sha256,
                 }
+
+            def validate_audio_cache(directory: Path) -> bool:
+                artifact = directory / "audio.wav"
+                if not _valid_working_audio(artifact, self.config.audio.sample_rate):
+                    return False
+                # StageCache validates the producer's temporary directory
+                # before writing result.json; metadata/hash validation applies
+                # to an already published cache entry.
+                if not (directory / "result.json").exists():
+                    return True
+                try:
+                    metadata = json.loads((directory / "result.json").read_text(encoding="utf-8"))
+                    source_hash = hashlib.sha256(utterance.audio_path.read_bytes()).hexdigest()
+                    working_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+                    return (metadata.get("source_sha256") == source_hash
+                            and metadata.get("working_sha256") == working_hash)
+                except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                    return False
 
             audio_meta = cache.load_or_run(
                 "audio",
                 audio_fp,
                 produce_audio,
-                validate=lambda directory: _valid_audio_artifact(directory / "audio.wav"),
+                validate=validate_audio_cache,
             )
             cached_audio = cache.directory("audio", audio_fp) / "audio.wav"
             if not cached_audio.is_file():
@@ -676,6 +741,10 @@ class JapanMFAPipeline:
                 int(audio_meta["source_sample_rate"]),
                 int(audio_meta["source_channels"]),
                 int(audio_meta["working_sample_rate"]),
+                int(audio_meta.get("source_frames", 0)),
+                int(audio_meta.get("working_frames", 0)),
+                str(audio_meta.get("source_sha256", "")),
+                str(audio_meta.get("working_sha256", "")),
             )
             durations["audio"] = time.monotonic() - stage_started
 
@@ -795,10 +864,10 @@ class JapanMFAPipeline:
 
             def produce_g2p(path: Path) -> dict[str, object]:
                 pronunciations = g2p.pronounce(tuple(token.reading for token in tokens), path)
-                return {"pronunciations": [{"reading": item.reading, "phones": list(item.phones)} for item in pronunciations]}
+                return {"pronunciations": [{"reading": item.reading, "phones": list(item.phones), "alternates": [list(variant) for variant in item.alternates]} for item in pronunciations]}
 
             g2p_payload = cache.load_or_run("g2p", g2p_fp, produce_g2p)
-            pronunciations = tuple(Pronunciation(str(item["reading"]), tuple(str(phone) for phone in item["phones"])) for item in g2p_payload["pronunciations"])
+            pronunciations = tuple(Pronunciation(str(item["reading"]), tuple(str(phone) for phone in item["phones"]), tuple(tuple(str(phone) for phone in variant) for variant in item.get("alternates", []))) for item in g2p_payload["pronunciations"])
             lexicon = LockedLexicon.build(utterance.utterance_id, tokens, pronunciations)
             mfa_root = _ensure_output_directory(artifact_dir, "mfa")
             corpus_dir = _ensure_output_directory(mfa_root, "corpus")
@@ -830,12 +899,11 @@ class JapanMFAPipeline:
             current_stage = "postprocess"
             stage_started = time.monotonic()
             duration = _duration(audio_info, alignment)
-            processed = postprocess_annotations(audio_info.working_path, duration, annotations)
-            if processed.report["reason_code"] == "alignment_acoustic_coverage":
-                processed = _recover_acoustic_coverage(
-                    mfa, artifact_dir, audio_info, duration, annotations, lexicon,
-                    toned_morae, phone_map, frozenset(self.config.validation.silence_labels), processed,
-                )
+            processed = postprocess_annotations(
+                audio_info.working_path, duration, annotations,
+                mfa_alignment=alignment,
+                enable_word_in_silence_filter=self.config.validation.enable_word_in_silence_filter,
+            )
             write_json(_safe_output_path(artifact_dir, "postprocess.json"), processed.report)
             durations["postprocess"] = time.monotonic() - stage_started
             if not processed.report["passed"]:
@@ -846,15 +914,44 @@ class JapanMFAPipeline:
             current_stage = "output"
             stage_started = time.monotonic()
             duration = _duration(audio_info, alignment)
+            if _punctuation_groups(source.original) != _punctuation_groups(kana):
+                raise StageFailure(
+                    "output", "punctuation_source_mismatch",
+                    "kana projection changed source punctuation order or grouping",
+                )
+            words, unplaced_punctuation = build_word_intervals(
+                duration, source.original, tokens, alignment.words, lexicon.aliases,
+            )
+            processed.report["punctuation_unplaced"] = list(unplaced_punctuation)
+            write_json(_safe_output_path(artifact_dir, "postprocess.json"), processed.report)
+            with wave.open(str(audio_info.working_path), "rb") as _working_stream:
+                _working_frames = _working_stream.getnframes()
+                _working_rate = _working_stream.getframerate()
+            _working_hash = hashlib.sha256(audio_info.working_path.read_bytes()).hexdigest()
             _publish_final_outputs(
                 artifact_dir,
                 final_grid,
                 final_alignment,
                 duration,
-                source.original,
-                kana,
+                _with_sp1(source.original),
+                _with_sp1(kana),
                 annotations,
                 frozenset(self.config.validation.silence_labels),
+                words=words,
+                working_audio=audio_info.working_path,
+                audio_receipt={
+                    "source": str(audio_info.source_path),
+                    "source_sample_rate": audio_info.source_sample_rate,
+                    "source_channels": audio_info.source_channels,
+                    "source_duration": audio_info.duration,
+                    "source_frames": audio_info.source_frames,
+                    "source_sha256": audio_info.source_sha256,
+                    "working": str(audio_info.working_path),
+                    "working_sample_rate": _working_rate,
+                    "working_frames": _working_frames,
+                    "working_duration": _working_frames / _working_rate if _working_rate else 0.0,
+                    "working_sha256": _working_hash,
+                },
             )
             durations["output"] = time.monotonic() - stage_started
             return UtteranceOutcome(utterance.utterance_id, "aligned", None, None, artifact_dir, durations)

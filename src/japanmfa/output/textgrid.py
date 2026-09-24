@@ -1,4 +1,4 @@
-"""Writing and strict validation for the public five-tier TextGrid artifact."""
+"""Writing and strict validation for Japanese word and phone TextGrid artifacts."""
 
 from __future__ import annotations
 
@@ -6,11 +6,13 @@ import math
 import os
 import re
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from japanmfa.domain import PhoneAnnotation, PhoneInterval
+from japanmfa.domain import PhoneAnnotation, PhoneInterval, Token
+from japanmfa.mfa.textgrid import MfaWord
 
 
 _ITEM_RE = re.compile(r"^\s{4}item\s+\[\d+\]:\s*$")
@@ -20,6 +22,22 @@ _FIELD_RE = re.compile(
 )
 _SIZE_RE = re.compile(r"^\s*(?:size|intervals:\s*size)\s*=\s*(\d+)\s*$")
 _EXPECTED_TIERS = ("original", "kana", "phones", "phone_kana", "phone_tone")
+_EXPECTED_TIERS_WITH_WORDS = ("original", "kana", "words", "phones", "phone_kana", "phone_tone")
+_CANONICAL_SILENCE_LABELS = frozenset({"<sp0>", "<sp1>", "<sp2>", "<sp3>"})
+
+
+def _canonical_silence_label(duration: float, *, leading: bool = False) -> str:
+    """Serialize every silence owner with the publication vocabulary."""
+    if leading:
+        return "<sp1>"
+    ticks = round(duration * 1_000_000)
+    if ticks < 200_000:
+        return "<sp0>"
+    if ticks < 500_000:
+        return "<sp1>"
+    if ticks < 1_500_000:
+        return "<sp2>"
+    return "<sp3>"
 
 
 @dataclass(frozen=True)
@@ -40,7 +58,7 @@ class _ParsedTier:
 
 
 def _error(message: str) -> ValueError:
-    return ValueError(f"invalid five-tier TextGrid: {message}")
+    return ValueError(f"invalid TextGrid: {message}")
 
 
 def _quoted(raw: str, field: str) -> str:
@@ -146,8 +164,8 @@ def _parse(path: Path) -> tuple[float, float, tuple[_ParsedTier, ...]]:
     ]
     if len(declared_sizes) != 1:
         raise _error("header requires exactly one tier size")
-    if declared_sizes[0] != 5 or declared_sizes[0] != len(item_starts):
-        raise _error("declared tier size does not equal five parsed tiers")
+    if declared_sizes[0] not in {5, 6} or declared_sizes[0] != len(item_starts):
+        raise _error("declared tier size does not equal parsed tiers")
 
     tiers: list[_ParsedTier] = []
     for item_number, start in enumerate(item_starts):
@@ -216,20 +234,29 @@ def validate_five_tier_textgrid(
     duration: float,
     silence_labels: frozenset[str],
 ) -> None:
-    """Re-open and validate a complete five-tier long TextGrid."""
+    """Re-open and validate complete legacy five-tier or production six-tier TextGrid."""
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError("duration must be finite and greater than zero")
     if not isinstance(silence_labels, frozenset) or not all(isinstance(label, str) for label in silence_labels):
         raise TypeError("silence_labels must be a frozenset of strings")
+    # Canonical postprocessing labels are part of the artifact contract.  A
+    # legacy config may only list MFA's input aliases (sil/sp/spn); published
+    # <sp0>..<sp3> must still be recognized without requiring config edits.
+    silence_labels = frozenset(silence_labels) | frozenset({"<sp0>", "<sp1>", "<sp2>", "<sp3>"})
     header_start, header_end, tiers = _parse(Path(path))
     if header_start != 0.0 or header_end != duration:
         raise _error("header duration does not match requested duration")
-    if tuple(tier.name for tier in tiers) != _EXPECTED_TIERS:
-        raise _error(f"tier order must be {_EXPECTED_TIERS!r}")
+    names = tuple(tier.name for tier in tiers)
+    if names not in {_EXPECTED_TIERS, _EXPECTED_TIERS_WITH_WORDS}:
+        raise _error(f"tier order must be {_EXPECTED_TIERS!r} or {_EXPECTED_TIERS_WITH_WORDS!r}")
     if any(tier.xmin != 0.0 or tier.xmax != duration for tier in tiers):
         raise _error("tier duration does not match requested duration")
 
-    original, kana, phones, phone_kana, phone_tone = tiers
+    if names == _EXPECTED_TIERS_WITH_WORDS:
+        original, kana, words, phones, phone_kana, phone_tone = tiers
+        _validate_intervals(words.intervals, duration, "words")
+    else:
+        original, kana, phones, phone_kana, phone_tone = tiers
     for tier in (original, kana):
         if len(tier.intervals) != 1:
             raise _error(f"{tier.name} must contain exactly one interval")
@@ -251,8 +278,8 @@ def validate_five_tier_textgrid(
         ) != (tone_interval.start_raw, tone_interval.end_raw):
             raise _error(f"phone-level boundaries differ at interval {index + 1}")
         if not phone.label or phone.label in silence_labels:
-            if kana_interval.label or tone_interval.label:
-                raise _error(f"silence labels are not empty at interval {index + 1}")
+            if kana_interval.label != phone.label or tone_interval.label != phone.label:
+                raise _error(f"silence labels are not canonical at interval {index + 1}")
         elif not phone.label or not kana_interval.label or not tone_interval.label:
             raise _error(f"non-silence labels are incomplete at interval {index + 1}")
         elif tone_interval.label not in {"HH", "LL", "HL", "LH"}:
@@ -333,14 +360,66 @@ def complete_phone_partition(
     return tuple(result)
 
 
+def _source_punctuation(value: str) -> str:
+    """Keep Japanese source punctuation as a single boundary occurrence."""
+    significant = "".join(character for character in value if not character.isspace())
+    if significant and all(
+        unicodedata.category(character).startswith("P") or character in "～〜"
+        for character in significant
+    ):
+        return significant
+    return ""
+
+
+def build_word_intervals(
+    duration: float,
+    source: str,
+    tokens: Sequence[Token],
+    aligned_words: Sequence[MfaWord],
+    aliases: Sequence[str],
+) -> tuple[tuple[tuple[float, float, str], ...], tuple[str, ...]]:
+    """Project source punctuation onto actual MFA word gaps, retaining untimed marks."""
+    if len(tokens) != len(aliases) or len(aligned_words) != len(aliases):
+        raise ValueError("MFA word count differs from locked source token count")
+    if not tokens or not 0 < duration < math.inf:
+        raise ValueError("word projection requires positive duration and tokens")
+    rows: list[tuple[float, float, str]] = []
+    unplaced: list[str] = []
+    cursor = 0.0
+    source_end = 0
+    for token, word, alias in zip(tokens, aligned_words, aliases):
+        if word.alias != alias or not cursor <= word.start < word.end <= duration:
+            raise ValueError("MFA word alias or boundaries differ from locked token order")
+        if not source_end <= token.start < token.end <= len(source):
+            raise ValueError("source token spans are not ordered")
+        punctuation = _source_punctuation(source[source_end:token.start])
+        if word.start > cursor:
+            label = (punctuation if cursor > 0 else "") or _canonical_silence_label(
+                word.start - cursor, leading=cursor == 0,
+            )
+            rows.append((cursor, word.start, label))
+        elif punctuation:
+            unplaced.append(punctuation)
+        rows.append((word.start, word.end, token.surface))
+        cursor = word.end
+        source_end = token.end
+    punctuation = _source_punctuation(source[source_end:])
+    if cursor < duration:
+        rows.append((cursor, duration, punctuation or _canonical_silence_label(duration - cursor)))
+    elif punctuation:
+        unplaced.append(punctuation)
+    return tuple(rows), tuple(unplaced)
+
+
 def write_five_tier_textgrid(
     path: Path,
     duration: float,
     original: str,
     kana: str,
     annotations: Sequence[PhoneAnnotation],
+    *, words: Sequence[tuple[float, float, str]] | None = None,
 ) -> None:
-    """Write, re-open, validate, and atomically publish a five-tier TextGrid."""
+    """Write, re-open, validate, and atomically publish a TextGrid."""
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError("duration must be finite and greater than zero")
     if not isinstance(original, str) or not isinstance(kana, str):
@@ -363,10 +442,15 @@ def write_five_tier_textgrid(
             raise ValueError("annotation intervals overlap or are not monotonic")
         previous_end = interval.end
         if annotation.is_silence:
-            silence_labels.add(interval.label)
+            silence_label = _canonical_silence_label(
+                interval.end - interval.start,
+                leading=interval.start == 0.0,
+            )
+            interval = PhoneInterval(interval.start, interval.end, silence_label)
+            silence_labels.add(silence_label)
             if annotation.kana_label or annotation.tone_label:
-                raise ValueError("silence annotations must have empty kana and tone labels")
-            phone_kana, phone_tone = "", ""
+                raise ValueError("silence annotations must not carry speech labels")
+            phone_kana, phone_tone = interval.label, interval.label
         else:
             if not interval.label or not annotation.kana_label or not annotation.tone_label:
                 raise ValueError("non-silence annotations require non-empty labels")
@@ -383,6 +467,10 @@ def write_five_tier_textgrid(
         ("phone_kana", tuple((start, end, label) for start, end, _, label, _ in phone_rows)),
         ("phone_tone", tuple((start, end, label) for start, end, _, _, label in phone_rows)),
     )
+    if words is not None:
+        word_rows = tuple((_float_text(start), _float_text(end), label)
+                          for start, end, label in words)
+        tiers = (tiers[0], tiers[1], ("words", word_rows), *tiers[2:])
     rendered = _render(duration, tiers)
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -407,4 +495,4 @@ def write_five_tier_textgrid(
                 pass
 
 
-__all__ = ["complete_phone_partition", "validate_five_tier_textgrid", "write_five_tier_textgrid"]
+__all__ = ["build_word_intervals", "complete_phone_partition", "validate_five_tier_textgrid", "write_five_tier_textgrid"]

@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
+import math
 
 import yaml
 
@@ -39,6 +40,17 @@ def _command(value: Any, name: str, default: tuple[str, ...]) -> tuple[str, ...]
     return tuple(value)
 
 
+def _finite_nonnegative(value: Any, name: str, default: float) -> float:
+    if value is None:
+        return default
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite non-negative number")
+    result = float(value)
+    if not math.isfinite(result) or result < 0:
+        raise ValueError(f"{name} must be a finite non-negative number")
+    return result
+
+
 @dataclass(frozen=True)
 class ASRConfig:
     model: str = "Qwen/Qwen3-ASR-1.7B"
@@ -50,11 +62,19 @@ class ASRConfig:
 class MFAConfig:
     acoustic_model: str = "japanese_mfa"
     g2p_model: str = "japanese_mfa"
+    dither: float = 0.0
 
 
 @dataclass(frozen=True)
 class AudioConfig:
     sample_rate: int = 16000
+    max_silence_sec: float = 1.0
+    sil_vol_threshold: float = 0.005
+    sil_len_threshold: float = 0.08
+    normalize_edges: bool = True
+    target_edge_silence_sec: float = 0.5
+    edge_silence_threshold: float = 0.001
+    edge_frame_length: int = 1024
 
 
 @dataclass(frozen=True)
@@ -72,7 +92,8 @@ class PathConfig:
 
 @dataclass(frozen=True)
 class ValidationConfig:
-    silence_labels: tuple[str, ...] = ("", "sil", "sp", "spn")
+    silence_labels: tuple[str, ...] = ("", "sil", "sp", "spn", "<sp0>", "<sp1>", "<sp2>", "<sp3>")
+    enable_word_in_silence_filter: bool = False
 
 
 @dataclass(frozen=True)
@@ -114,7 +135,7 @@ class PipelineConfig:
         )
 
         mfa_values = _as_mapping(values.get("mfa"), "mfa")
-        _reject_unknown(mfa_values, {"acoustic_model", "g2p_model"}, "mfa")
+        _reject_unknown(mfa_values, {"acoustic_model", "g2p_model", "dither"}, "mfa")
         mfa = MFAConfig(
             acoustic_model=_string(
                 mfa_values.get("acoustic_model"),
@@ -124,14 +145,33 @@ class PipelineConfig:
             g2p_model=_string(
                 mfa_values.get("g2p_model"), "mfa.g2p_model", MFAConfig.g2p_model
             ),
+            dither=_finite_nonnegative(mfa_values.get("dither"), "mfa.dither", MFAConfig.dither),
         )
 
         audio_values = _as_mapping(values.get("audio"), "audio")
-        _reject_unknown(audio_values, {"sample_rate"}, "audio")
+        _reject_unknown(audio_values, {"sample_rate", "max_silence_sec", "sil_vol_threshold",
+                                       "sil_len_threshold", "normalize_edges",
+                                       "target_edge_silence_sec", "edge_silence_threshold",
+                                       "edge_frame_length"}, "audio")
         sample_rate = audio_values.get("sample_rate", AudioConfig.sample_rate)
         if isinstance(sample_rate, bool) or not isinstance(sample_rate, int) or sample_rate <= 0:
             raise ValueError("audio.sample_rate must be a positive integer")
-        audio = AudioConfig(sample_rate=sample_rate)
+        normalize_edges = audio_values.get("normalize_edges", AudioConfig.normalize_edges)
+        if not isinstance(normalize_edges, bool):
+            raise ValueError("audio.normalize_edges must be a boolean")
+        edge_frame_length = audio_values.get("edge_frame_length", AudioConfig.edge_frame_length)
+        if isinstance(edge_frame_length, bool) or not isinstance(edge_frame_length, int) or edge_frame_length <= 0:
+            raise ValueError("audio.edge_frame_length must be a positive integer")
+        audio = AudioConfig(
+            sample_rate=sample_rate,
+            max_silence_sec=_finite_nonnegative(audio_values.get("max_silence_sec"), "audio.max_silence_sec", AudioConfig.max_silence_sec),
+            sil_vol_threshold=_finite_nonnegative(audio_values.get("sil_vol_threshold"), "audio.sil_vol_threshold", AudioConfig.sil_vol_threshold),
+            sil_len_threshold=_finite_nonnegative(audio_values.get("sil_len_threshold"), "audio.sil_len_threshold", AudioConfig.sil_len_threshold),
+            normalize_edges=normalize_edges,
+            target_edge_silence_sec=_finite_nonnegative(audio_values.get("target_edge_silence_sec"), "audio.target_edge_silence_sec", AudioConfig.target_edge_silence_sec),
+            edge_silence_threshold=_finite_nonnegative(audio_values.get("edge_silence_threshold"), "audio.edge_silence_threshold", AudioConfig.edge_silence_threshold),
+            edge_frame_length=edge_frame_length,
+        )
 
         command_values = _as_mapping(values.get("commands"), "commands")
         _reject_unknown(command_values, {"ffmpeg", "asr_worker", "mfa"}, "commands")
@@ -157,7 +197,7 @@ class PipelineConfig:
         )
 
         validation_values = _as_mapping(values.get("validation"), "validation")
-        _reject_unknown(validation_values, {"silence_labels"}, "validation")
+        _reject_unknown(validation_values, {"silence_labels", "enable_word_in_silence_filter"}, "validation")
         silence_labels = validation_values.get(
             "silence_labels", ValidationConfig.silence_labels
         )
@@ -165,7 +205,15 @@ class PipelineConfig:
             isinstance(label, str) for label in silence_labels
         ):
             raise ValueError("validation.silence_labels must be a string array")
-        validation = ValidationConfig(silence_labels=tuple(silence_labels))
+        enable_word_filter = validation_values.get(
+            "enable_word_in_silence_filter", ValidationConfig.enable_word_in_silence_filter
+        )
+        if not isinstance(enable_word_filter, bool):
+            raise ValueError("validation.enable_word_in_silence_filter must be a boolean")
+        validation = ValidationConfig(
+            silence_labels=tuple(silence_labels),
+            enable_word_in_silence_filter=enable_word_filter,
+        )
 
         return cls(
             asr=asr,

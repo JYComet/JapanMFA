@@ -44,6 +44,7 @@ class Mora:
 class Pronunciation:
     reading: str
     phones: tuple[str, ...]
+    alternates: tuple[tuple[str, ...], ...] = ()
 
 
 @dataclass(frozen=True)

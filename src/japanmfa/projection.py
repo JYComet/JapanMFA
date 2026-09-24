@@ -178,13 +178,16 @@ def _reconcile_words(
     ):
         indices = _word_phone_indices(alignment, word.alias)
         aligned = tuple(phone_map.normalize(alignment.phones[index].label) for index in indices)
-        expected = tuple(phone_map.normalize(phone) for phone in pronunciation.phones)
-        if aligned != expected:
+        expected = tuple(
+            tuple(phone_map.normalize(phone) for phone in candidate)
+            for candidate in (pronunciation.phones, *pronunciation.alternates)
+        )
+        if aligned not in expected:
             raise _failure(
                 "phone_sequence_mismatch",
                 "ordered non-silence MFA phones differ from the locked pronunciation",
                 alias=word.alias,
-                expected=list(expected),
+                expected=[list(candidate) for candidate in expected],
                 actual=[alignment.phones[index].label for index in indices],
             )
         mapping = _match_morae_to_phones(token_morae[token.index], aligned, phone_map)

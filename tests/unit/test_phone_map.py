@@ -214,3 +214,65 @@ rules:
         PhoneMap.load(path)
 
     assert exc_info.value.reason_code == "invalid_rule"
+
+
+def test_bundled_map_covers_observed_kaze_ze_phones() -> None:
+    phone_map = PhoneMap.load(DATA_PATH)
+    rule = phone_map.rule_for(("ゼ",), ("z", "e"))
+    assert rule.mora_spans == ((0, 1), (0, 1))
+
+
+@pytest.mark.parametrize(
+    "kana, phones",
+    [
+        (("ウ",), ("ɯ",)),
+        (("ナ",), ("n", "a")),
+        (("イ",), ("i",)),
+        (("テ",), ("t", "e")),
+    ],
+)
+def test_bundled_map_covers_observed_uuun_onaka_aite_nais(kana: tuple[str, ...], phones: tuple[str, ...]) -> None:
+    assert PhoneMap.load(DATA_PATH).rule_for(kana, phones).kana == kana
+
+
+@pytest.mark.parametrize(
+    "kana, phones",
+    [
+        (("セ",), ("s", "e")),
+        (("ダ",), ("d", "a")),
+        (("ジョ",), ("ʑ", "o")),
+        (("ブ",), ("b", "ɯ")),
+    ],
+)
+def test_bundled_map_covers_mfa_selected_sekai_daijoubu_variant(kana: tuple[str, ...], phones: tuple[str, ...]) -> None:
+    assert PhoneMap.load(DATA_PATH).rule_for(kana, phones).kana == kana
+
+
+@pytest.mark.parametrize(
+    "kana, phones",
+    [
+        (("メ",), ("m", "e")),
+        (("ノ",), ("n", "o")),
+        (("マ",), ("m", "a")),
+        (("エ",), ("e",)),
+        (("ガ",), ("ɡ", "a")),
+        (("グ",), ("ɡ", "ɯ")),
+        (("ル",), ("ɾ", "ɯ")),
+        (("シ",), ("ɕ", "i")),
+        (("ゴ",), ("ɡ", "o")),
+        (("タ",), ("t", "a")),
+        (("ベ",), ("b", "e")),
+        (("ユ",), ("j", "ɨ")),
+        (("デ",), ("d", "e")),
+        (("モ",), ("m", "o")),
+        (("ツ",), ("ts", "ɨ")),
+        (("ク",), ("k", "ɯ")),
+    ],
+)
+def test_bundled_map_covers_observed_no_reference_morae(kana: tuple[str, ...], phones: tuple[str, ...]) -> None:
+    assert PhoneMap.load(DATA_PATH).rule_for(kana, phones).kana == kana
+
+
+def test_bundled_map_covers_observed_long_rou_across_two_morae() -> None:
+    rule = PhoneMap.load(DATA_PATH).rule_for(("ロ", "ウ"), ("ɾ", "oː"))
+    assert rule.mora_spans == ((0, 1), (0, 2))
