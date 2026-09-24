@@ -420,6 +420,43 @@ def _bgm_suspects(
 
 
 
+
+def _low_energy_final_vowels(
+    audio: np.ndarray, rate: int, annotations: tuple[PhoneAnnotation, ...],
+) -> list[dict[str, object]]:
+    """Reject a clearly silent final /a,e,o/ after an energetic vowel owner.
+
+    Japanese /i,ɯ/ can devoice, so this narrow diagnostic does not infer
+    their timing from energy alone. It catches the observed MFA error where a
+    whole word is energetic but its last /e/ is placed after the waveform.
+    """
+    issues: list[dict[str, object]] = []
+    for index, item in enumerate(annotations[:-1]):
+        if (item.is_silence or not annotations[index + 1].is_silence
+                or item.interval.label.replace("ː", "") not in {"a", "e", "o"}
+                or item.interval.end - item.interval.start < .025):
+            continue
+        prior = [other for other in annotations[:index]
+                 if not other.is_silence and other.token_index == item.token_index
+                 and other.interval.label.replace("ː", "") in {"a", "e", "o"}]
+        if not prior:
+            continue
+        def rms(owner: PhoneAnnotation) -> float:
+            lo = max(0, int(owner.interval.start * rate))
+            hi = min(len(audio), int(owner.interval.end * rate))
+            segment = audio[lo:hi].astype(np.float64)
+            return float(np.sqrt(np.mean(segment ** 2))) if len(segment) else 0.0
+        reference = max(rms(other) for other in prior)
+        observed = rms(item)
+        threshold = max(.001, reference * .02)
+        if reference >= .01 and observed < threshold:
+            issues.append({"index": index, "label": item.interval.label,
+                           "start": item.interval.start, "end": item.interval.end,
+                           "rms": observed, "reference_rms": reference,
+                           "threshold": threshold})
+    return issues
+
+
 def _unowned_tail_speech_regions(
     audio: np.ndarray, rate: int, annotations: tuple[PhoneAnnotation, ...],
     explicit_silence_spans: tuple[tuple[float, float], ...],
@@ -723,6 +760,9 @@ def postprocess_annotations(
     report["short_phone_issues"] = _phone_duration_qc_issues(completed)
     if report["short_phone_issues"]:
         report.update(passed=False, reason_code="short_phone")
+    report["low_energy_phone_issues"] = _low_energy_final_vowels(audio, rate, completed)
+    if report["passed"] and report["low_energy_phone_issues"]:
+        report.update(passed=False, reason_code="phone_in_silence")
     raw_silence_spans = tuple(
         (float(item.start), float(item.end))
         for item in getattr(mfa_alignment, "phones", ())

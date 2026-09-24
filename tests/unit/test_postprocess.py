@@ -270,3 +270,27 @@ def test_postprocess_rejects_quiet_speech_island_after_last_mfa_word(tmp_path: P
     assert not result.report["passed"]
     assert result.report["reason_code"] == "alignment_acoustic_coverage"
     assert result.report["unowned_speech_regions"][0]["xmin"] == pytest.approx(1.2, abs=.02)
+
+
+def test_postprocess_rejects_final_voiced_vowel_placed_in_silence(tmp_path: Path) -> None:
+    """A whole-word energy average must not hide a silent final vowel phone."""
+    from japanmfa.mfa.textgrid import MfaAlignment, MfaPhone, MfaWord
+
+    audio = tmp_path / "silent_final_vowel.wav"
+    write_wave(audio, ((.2, .58),), duration=1.)
+    leading = PhoneAnnotation(PhoneInterval(0., .2, ""), None, (), "", "", True)
+    first = PhoneAnnotation(PhoneInterval(.2, .6, "a"), 0, (Mora(0, 0, "ア", "H"),), "ア", "HH", False)
+    final = PhoneAnnotation(PhoneInterval(.6, .7, "e"), 0, (Mora(0, 1, "エ", "H"),), "エ", "HH", False)
+    trailing = PhoneAnnotation(PhoneInterval(.7, 1., ""), None, (), "", "", True)
+    alignment = MfaAlignment(
+        words=(MfaWord("jmfa_000000", .2, .7),),
+        phones=(MfaPhone("", 0., .2, None, True),
+                MfaPhone("a", .2, .6, "jmfa_000000", False),
+                MfaPhone("e", .6, .7, "jmfa_000000", False),
+                MfaPhone("", .7, 1., None, True)),
+        diagnostic_intervals=(),
+    )
+    result = postprocess_annotations(audio, 1., (leading, first, final, trailing), mfa_alignment=alignment)
+    assert not result.report["passed"]
+    assert result.report["reason_code"] == "phone_in_silence"
+    assert result.report["low_energy_phone_issues"][0]["label"] == "e"
