@@ -419,6 +419,60 @@ def _bgm_suspects(
              "suspect_dur": round(suspect_dur, 3), "details": details[:10]}]
 
 
+
+def _unowned_tail_speech_regions(
+    audio: np.ndarray, rate: int, annotations: tuple[PhoneAnnotation, ...],
+    explicit_silence_spans: tuple[tuple[float, float], ...],
+) -> list[dict[str, float]]:
+    """Detect a separate sustained sound island after the last MFA speech phone.
+
+    Adapt the old ``find_speech_in_silence`` 5 ms frame, 2.5x local noise,
+    15%-of-peak and 40 ms minimum-region rule. A quiet break before the
+    island keeps normal word-tail decay from being mistaken for a new word.
+    """
+    speech = [item for item in annotations if not item.is_silence]
+    if not speech:
+        return []
+    last_end = max(item.interval.end for item in speech)
+    frame = max(1, int(.005 * rate))
+    minimum_frames = max(1, int(.04 * rate / frame))
+    found: list[dict[str, float]] = []
+    for start, end in explicit_silence_spans:
+        if start < last_end - 1.0 / rate or end - start < .2:
+            continue
+        lo, hi = max(0, int(start * rate)), min(len(audio), int(end * rate))
+        count = (hi - lo) // frame
+        if count < minimum_frames * 2:
+            continue
+        frames = audio[lo:lo + count * frame].reshape(count, frame).astype(np.float64)
+        rms = np.sqrt(np.mean(frames ** 2, axis=1) + 1e-12)
+        noise = float(np.median(rms[int(.6 * count):]))
+        threshold = max(noise * 2.5, float(np.max(rms)) * .15)
+        active = rms > threshold
+        quiet_run = 0
+        quiet_seen = False
+        index = 0
+        while index <= count - minimum_frames:
+            if not active[index]:
+                quiet_run += 1
+                quiet_seen = quiet_seen or quiet_run >= minimum_frames
+                index += 1
+                continue
+            run_end = index
+            while run_end < count and active[run_end]:
+                run_end += 1
+            # A new acoustic island must begin after at least 40 ms of
+            # measured quiet following the last published speech phone.
+            if quiet_seen and run_end - index >= minimum_frames:
+                found.append({"xmin": round(start + index * frame / rate, 6),
+                              "xmax": round(start + run_end * frame / rate, 6),
+                              "silence_start": start, "silence_end": end,
+                              "threshold": threshold})
+            quiet_run = 0
+            index = run_end
+    return found
+
+
 def _rms_frames_in_span(audio: np.ndarray, rate: int, start: float, end: float,
                         frame_ms: float = 10.0) -> tuple[np.ndarray, list[tuple[float, float]]]:
     frame = max(1, int(round(frame_ms / 1000.0 * rate)))
@@ -692,6 +746,11 @@ def postprocess_annotations(
     ])
     if report["bgm_suspects"]:
         report.update(passed=False, reason_code="bgm_suspect")
+    report["unowned_speech_regions"] = _unowned_tail_speech_regions(
+        audio, rate, completed, refined_silence_spans,
+    )
+    if report["passed"] and report["unowned_speech_regions"]:
+        report.update(passed=False, reason_code="alignment_acoustic_coverage")
     report["word_energy_audit"] = _word_energy_audit(
         np.asarray(samples, dtype=np.float32) / 32768.0, rate, mfa_alignment,
         enabled=enable_word_in_silence_filter,

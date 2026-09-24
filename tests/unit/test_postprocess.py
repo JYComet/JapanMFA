@@ -241,3 +241,32 @@ def test_bgm_audit_detects_sustained_burst_hidden_by_long_silence_average() -> N
     assert len(suspects) == 1
     assert suspects[0]["details"][0]["xmin"] == 1.
     assert suspects[0]["details"][0]["high_ratio"] >= .20
+
+
+def test_postprocess_rejects_quiet_speech_island_after_last_mfa_word(tmp_path: Path) -> None:
+    """A missing final word must not pass merely because its energy is below BGM's threshold."""
+    from japanmfa.mfa.textgrid import MfaAlignment, MfaPhone, MfaWord
+
+    audio = tmp_path / "omitted_tail.wav"
+    samples = array.array("h", (
+        int((8000 if .5 <= i / 16000 < 1.0 else 650 if 1.18 <= i / 16000 < 1.19 or 1.2 <= i / 16000 < 1.5 else 0)
+            * math.sin(2 * math.pi * 200 * i / 16000))
+        for i in range(2 * 16000)
+    ))
+    with wave.open(str(audio), "wb") as out:
+        out.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+        out.writeframes(samples.tobytes())
+    leading = PhoneAnnotation(PhoneInterval(0., .5, ""), None, (), "", "", True)
+    trailing = PhoneAnnotation(PhoneInterval(1., 2., ""), None, (), "", "", True)
+    alignment = MfaAlignment(
+        words=(MfaWord("jmfa_000000", .5, 1.),),
+        phones=(MfaPhone("", 0., .5, None, True),
+                MfaPhone("a", .5, 1., "jmfa_000000", False),
+                MfaPhone("", 1., 2., None, True)),
+        diagnostic_intervals=(),
+    )
+    result = postprocess_annotations(audio, 2., (leading, phone(.5, 1.), trailing), mfa_alignment=alignment)
+    assert result.report["bgm_suspects"] == []
+    assert not result.report["passed"]
+    assert result.report["reason_code"] == "alignment_acoustic_coverage"
+    assert result.report["unowned_speech_regions"][0]["xmin"] == pytest.approx(1.2, abs=.02)
