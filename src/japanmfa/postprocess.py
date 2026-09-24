@@ -1,10 +1,10 @@
-"""Upstream silence preprocessing and evidence-only MFA postprocessing.
+"""Upstream silence preprocessing and acoustic MFA postprocessing.
 
 Adapted concepts: ASRMFA--Pure scripts/audio_energy.py frame_rms,
 noise_floor_from_rms, speech_onset/speech_offset, and postprocess_textgrids.py
 find_speech_in_silence, at c2bcdf6ef81f67aa93bf1bf5e4bb5dbfc8278c85.
-Existing MFA phone edges are immutable; publication only fills uncovered gaps
-with canonical silence owners and records applicable acoustic diagnostics.
+Only energy-supported edges adjacent to explicit MFA silence are refined.
+All other MFA phone edges remain unchanged.
 """
 
 from __future__ import annotations
@@ -272,6 +272,86 @@ def _collect_tier_discontinuities(tier: object, duration: float | None = None) -
     return result
 
 
+
+def _refine_silence_phone_boundaries(
+    audio: np.ndarray, rate: int, annotations: tuple[PhoneAnnotation, ...],
+) -> tuple[tuple[PhoneAnnotation, ...], list[dict[str, object]]]:
+    """Move only explicit silence/phone edges when 10 ms energy proves leakage.
+
+    This is the Japanese phone-tier adaptation of the old pipeline's energy
+    boundary stage: 15th-percentile noise, 3x/0.001 threshold, local windows,
+    and a visible energy drop/onset. It never crosses a separate silent run or
+    changes an internal phone/phone edge.
+    """
+    frame = max(1, int(.010 * rate))
+    count = len(audio) // frame
+    if count < 3:
+        return annotations, []
+    global_frames = audio[:count * frame].reshape(count, frame).astype(np.float64)
+    rms = np.sqrt(np.mean(global_frames ** 2, axis=1) + 1e-12)
+    noise = float(np.percentile(rms, 15))
+    threshold = max(noise * 3.0, .001)
+    rows = list(annotations)
+    edits: list[dict[str, object]] = []
+
+    def energy(start: float, end: float) -> np.ndarray:
+        first = max(0, min(count, int(math.ceil(start * rate / frame - 1e-9))))
+        last = max(first, min(count, int(math.floor(end * rate / frame + 1e-9))))
+        return rms[first:last]
+
+    for index in range(len(rows) - 1):
+        left, right = rows[index], rows[index + 1]
+        old = left.interval.end
+        if abs(old - right.interval.start) > 1.0 / rate:
+            continue
+        if not left.is_silence and right.is_silence:
+            # Old word-end refinement looks for a real energy fall. Preserve
+            # the explicit silence if the scan has no sustained quiet region.
+            if old - left.interval.start < .015 or right.interval.end - old < .05:
+                continue
+            before = energy(max(left.interval.start, old - .03), old)
+            after = energy(old, min(right.interval.end, old + .5))
+            if len(before) < 2 or len(after) < 5 or not np.all(before[-2:] > threshold):
+                continue
+            if not np.all(after[:2] > threshold):
+                continue
+            quiet = next((offset for offset in range(2, len(after) - 2)
+                          if np.all(after[offset:offset + 3] < threshold)), None)
+            if quiet is None:
+                continue
+            boundary = round(old + quiet * frame / rate, 6)
+            if boundary - old < .02 or right.interval.end - boundary < .03:
+                continue
+            rows[index] = replace(left, interval=PhoneInterval(left.interval.start, boundary, left.interval.label))
+            rows[index + 1] = replace(right, interval=PhoneInterval(boundary, right.interval.end, right.interval.label))
+            edits.append({"index": index, "reason": "energy_tail_extension", "before": old,
+                          "after": boundary, "noise_floor": noise, "threshold": threshold})
+        elif left.is_silence and not right.is_silence:
+            # The old silence-adjacent pull-back is bounded to 120 ms.
+            if old - left.interval.start < .05 or right.interval.end - old < .015:
+                continue
+            before_start = max(left.interval.start, old - .12)
+            before = energy(before_start, old)
+            after = energy(old, min(right.interval.end, old + .03))
+            if len(before) < 5 or len(after) < 2 or not np.all(after[:2] > threshold):
+                continue
+            if not np.all(before[-2:] > threshold):
+                continue
+            onset = next((offset + 3 for offset in range(len(before) - 4)
+                          if np.all(before[offset:offset + 3] < threshold)
+                          and np.all(before[offset + 3:offset + 5] > threshold)), None)
+            if onset is None:
+                continue
+            boundary = round(before_start + onset * frame / rate, 6)
+            if old - boundary < .02 or boundary - left.interval.start < .03:
+                continue
+            rows[index] = replace(left, interval=PhoneInterval(left.interval.start, boundary, left.interval.label))
+            rows[index + 1] = replace(right, interval=PhoneInterval(boundary, right.interval.end, right.interval.label))
+            edits.append({"index": index + 1, "reason": "energy_onset_pullback", "before": old,
+                          "after": boundary, "noise_floor": noise, "threshold": threshold})
+    return tuple(rows), edits
+
+
 def _bgm_suspects(
     audio: np.ndarray,
     rate: int,
@@ -279,61 +359,64 @@ def _bgm_suspects(
     *,
     explicit_silence_spans: tuple[tuple[float, float], ...] | None = None,
 ) -> list[dict[str, object]]:
-    """Detect energetic explicit MFA silence owners using upstream defaults."""
-    frame = max(1, int(.010 * rate)); hop = max(1, int(.005 * rate))
+    """Run the old pipeline's final-boundary 50 ms frame-level BGM scan."""
     if explicit_silence_spans is None:
         silence_spans = [(item.interval.start, item.interval.end) for item in annotations
-                         if item.is_silence and item.interval.end - item.interval.start >= .3]
+                         if item.is_silence]
     else:
         silence_spans = [(float(start), float(end)) for start, end in explicit_silence_spans
-                         if math.isfinite(float(start)) and math.isfinite(float(end))
-                         and float(end) - float(start) >= .3]
+                         if math.isfinite(float(start)) and math.isfinite(float(end))]
+    silence_spans = [(start, end) for start, end in silence_spans if end - start >= .3]
     if not silence_spans:
         return []
-    def frame_rms(segment: np.ndarray) -> list[float]:
-        return [float(np.sqrt(np.mean(segment[offset:offset + frame].astype(np.float64) ** 2) + 1e-12))
-                for offset in range(0, max(0, len(segment) - frame + 1), hop)]
-    silence_rms: list[float] = []
-    for start, end in silence_spans:
-        lo, hi = max(0, int(start * rate)), min(len(audio), int(end * rate))
-        silence_rms.extend(frame_rms(audio[lo:hi]))
-    if silence_rms:
-        quiet = sorted(silence_rms)[:max(1, int(len(silence_rms) * .1))]
-        noise = float(np.median(np.asarray(quiet, dtype=np.float64)))
+    frame = max(1, int(.010 * rate))
+    count = len(audio) // frame
+    if count:
+        frames = audio[:count * frame].reshape(count, frame).astype(np.float64)
+        all_rms = np.sqrt(np.mean(frames ** 2, axis=1) + 1e-12)
+        kth = min(count - 1, max(1, int(count * .6)))
+        noise = max(float(np.partition(all_rms, kth)[kth]), 1e-6)
     else:
-        all_rms = frame_rms(audio)
-        quiet = sorted(all_rms)[:max(1, int(len(all_rms) * .6))]
-        noise = float(np.median(np.asarray(quiet, dtype=np.float64))) if quiet else 1e-6
-    noise = max(noise, 1e-6)
-    speech = [item for item in annotations if not item.is_silence]
-    speech_values = []
-    for item in speech:
-        lo, hi = max(0, int(item.interval.start * rate)), min(len(audio), int(item.interval.end * rate))
-        if hi > lo:
-            speech_values.append(float(np.median(np.abs(audio[lo:hi]))))
-    speech_energy = float(np.median(np.asarray(speech_values, dtype=np.float64))) if speech_values else noise
-    suspects = []
+        noise = 1e-6
+    threshold = min(max(noise * 2.0, .005), .05)
+    speech_energies = []
+    for item in annotations:
+        if item.is_silence:
+            continue
+        start = max(0, int(item.interval.start * rate))
+        end = min(len(audio), int(item.interval.end * rate))
+        if end > start:
+            speech_energies.append(float(np.mean(np.abs(audio[start:end]))))
+    avg_speech = float(np.mean(speech_energies)) if speech_energies else 0.0
+    details: list[dict[str, object]] = []
+    total_sil_dur = 0.0
+    suspect_dur = 0.0
+    scan_frame = max(1, int(.050 * rate))
+    hop = max(1, scan_frame // 2)
     for start, end in silence_spans:
-        lo, hi = max(0, int(start * rate)), min(len(audio), int(end * rate))
+        lo = max(0, int(start * rate))
+        hi = min(len(audio), int(end * rate))
         if hi <= lo:
             continue
-        nonzero = np.abs(audio[lo:hi])
-        nonzero = nonzero[nonzero > 0]
-        energy = float(np.mean(nonzero)) if len(nonzero) else 0.0
-        if energy > .01 and energy > noise * 2.0 and energy > speech_energy:
-            suspects.append({"xmin": start, "xmax": end,
-                             "duration": end - start,
-                             "energy": energy, "noise_floor": noise})
-    if not suspects:
+        span_dur = end - start
+        total_sil_dur += span_dur
+        n_frames = max(1, (hi - lo - scan_frame) // hop + 1)
+        values = [float(np.mean(np.abs(audio[lo + offset * hop:min(lo + offset * hop + scan_frame, hi)])))
+                  for offset in range(n_frames)]
+        high_ratio = sum(value > threshold for value in values) / n_frames
+        if high_ratio >= .20:
+            details.append({"xmin": start, "xmax": end, "duration": span_dur,
+                            "energy": max(values), "high_ratio": round(high_ratio, 3),
+                            "noise_floor": noise})
+            suspect_dur += span_dur * high_ratio
+    if not details or not total_sil_dur or suspect_dur / total_sil_dur <= .1:
         return []
-    total_sil_dur = sum(end - start for start, end in silence_spans)
-    suspect_dur = sum(float(item["duration"]) for item in suspects)
     return [{"rule": "bgm_suspect", "noise_floor": round(noise, 6),
-             "avg_speech_energy": round(speech_energy, 6),
-             "suspect_intervals": len(suspects),
-             "suspect_ratio": round(suspect_dur / total_sil_dur, 3) if total_sil_dur else 0.0,
+             "avg_speech_energy": round(avg_speech, 6),
+             "suspect_intervals": len(details),
+             "suspect_ratio": round(suspect_dur / total_sil_dur, 3),
              "total_sil_dur": round(total_sil_dur, 3),
-             "suspect_dur": round(suspect_dur, 3), "details": suspects[:10]}]
+             "suspect_dur": round(suspect_dur, 3), "details": details[:10]}]
 
 
 def _rms_frames_in_span(audio: np.ndarray, rate: int, start: float, end: float,
@@ -547,6 +630,10 @@ def postprocess_annotations(
             edits.append({"index": index, "reason": "sample_roundoff", "before": item.interval.end, "after": duration})
     # Validate before using geometry in acoustic decisions.
     complete_phone_partition(duration, adjusted)
+    audio = np.asarray(samples, dtype=np.float32) / 32768.0
+    adjusted, energy_edits = _refine_silence_phone_boundaries(audio, rate, tuple(adjusted))
+    edits.extend(energy_edits)
+    complete_phone_partition(duration, adjusted)
 
     size = max(1, round(rate * .005))
     rms = [math.sqrt(sum(v * v for v in samples[i:i + size]) / len(samples[i:i + size])) / 32768.
@@ -554,7 +641,7 @@ def postprocess_annotations(
     step = size / rate
     report: dict[str, object] = {
         "version": 2, "reference_commit": "c2bcdf6ef81f67aa93bf1bf5e4bb5dbfc8278c85",
-        "method": "upstream_mfa_geometry_and_explicit_silence_qc", "frame_seconds": step,
+        "method": "upstream_energy_refined_mfa_and_explicit_silence_qc", "frame_seconds": step,
         "sample_rate": rate,
         "raw_phones": annotation_rows(annotations), "edits": edits,
         "tone_source": "tdmelodic_predicted_mora_accent_not_measured_f0",
@@ -587,9 +674,17 @@ def postprocess_annotations(
         for item in getattr(mfa_alignment, "phones", ())
         if bool(getattr(item, "is_silence", False))
     ) if mfa_alignment is not None else ()
+    refined_silence_spans = tuple(
+        (item.interval.start, item.interval.end)
+        for item in adjusted if item.is_silence
+    ) if raw_silence_spans else ()
+    report["energy_boundary_refinement"] = {
+        "edits": energy_edits, "raw_explicit_silence_spans": raw_silence_spans,
+        "refined_explicit_silence_spans": refined_silence_spans,
+    }
     report["bgm_suspects"] = _bgm_suspects(
-        np.asarray(samples, dtype=np.float32) / 32768.0, rate, completed,
-        explicit_silence_spans=raw_silence_spans,
+        audio, rate, completed,
+        explicit_silence_spans=refined_silence_spans,
     )
     report["bgm_diagnostics"] = ([] if raw_silence_spans else [
         {"reason": "explicit_mfa_silence_owner_unavailable",
@@ -608,7 +703,8 @@ def postprocess_annotations(
     ):
         report.update(passed=False, reason_code="word_in_silence")
     report["blocked_upstream_capabilities"] = [
-        {"capability": "_refine_boundaries_by_energy", "reason": "timed CTC lexical/punctuation evidence unavailable"},
+        {"capability": "_refine_boundaries_by_energy_full_word", "reason": "only explicit silence/phone edges are adapted; timed CTC lexical/punctuation evidence unavailable"},
+        {"capability": "CTC_word_boundary_snap", "reason": "timed CTC lexical/punctuation evidence unavailable"},
         {"capability": "merge_short_silences", "reason": "would delete retained MFA phone ownership"},
         {"capability": "fix_short_words", "reason": "Chinese lexical boundary mutation is not applicable"},
         {"capability": "CTC_gap_BGM", "reason": "exact CTC gap evidence unavailable"},

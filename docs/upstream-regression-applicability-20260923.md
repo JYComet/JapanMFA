@@ -300,3 +300,7 @@ were checked against the corresponding risks:
 
 The full outcome counts and audio/TextGrid checks are in
 `docs/test-report-upstream-postprocess-20260924.md`.
+
+## 2026-09-24 声能边界复查补充
+
+[逐帧 BGM 与边界微调实测](test-report-energy-boundary-20260924.md)记录了 Case 25、45、66、205/207–210 对七条日语音频的再次检查。0110 的末尾边界可按声能从 2.91 秒修到 3.29 秒，但中间静音仍有 31.1% 高能量帧；0060 的大范围错位同样保留失败。旧表原有状态仅表示当时的适用性审计，不代表本次已补齐 CTC 证据。

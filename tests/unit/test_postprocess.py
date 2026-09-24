@@ -62,8 +62,9 @@ def test_postprocess_recovers_small_late_onset_without_consuming_other_phone(tmp
     leading = PhoneAnnotation(PhoneInterval(0., .16, ""), None, (), "", "", True)
     result = postprocess_annotations(audio, 1., (leading, phone(.16, .7)))
     assert result.report["passed"]
-    assert result.annotations[0].interval.end == .16
-    assert result.annotations[1].interval.start == .16
+    assert result.annotations[0].interval.end == pytest.approx(.1, abs=.01)
+    assert result.annotations[1].interval.start == result.annotations[0].interval.end
+    assert any(edit["reason"] == "energy_onset_pullback" for edit in result.report["edits"])
 
 
 def test_postprocess_audits_single_sample_roundoff_but_rejects_large_overshoot(tmp_path: Path) -> None:
@@ -112,7 +113,7 @@ def test_short_phone_qc_uses_integer_microsecond_boundary(tmp_path: Path, second
     assert bool(result.report["short_phone_issues"]) is expected
 
 
-def test_bgm_audit_uses_explicit_silence_frames_and_nonzero_energy() -> None:
+def test_bgm_audit_ignores_sparse_transients_in_explicit_silence() -> None:
     import numpy as np
     from japanmfa.postprocess import _bgm_suspects
 
@@ -123,8 +124,7 @@ def test_bgm_audit_uses_explicit_silence_frames_and_nonzero_energy() -> None:
     speech = phone(.5, 1.)
     trailing = PhoneAnnotation(PhoneInterval(1., 2., ""), None, (), "", "", True)
     suspects = _bgm_suspects(samples, 1000, (silence, speech, trailing))
-    assert len(suspects) == 1
-    assert suspects[0]["noise_floor"] == pytest.approx(1e-6)
+    assert suspects == []
 
 
 def test_word_energy_frames_are_global_10ms_float32_spans() -> None:
@@ -171,3 +171,73 @@ def test_discontinuity_collector_adapts_phone_annotations() -> None:
 def test_short_phone_qc_serializes_endpoints_before_subtraction(start: float, end: float, expected: bool) -> None:
     from japanmfa.postprocess import _phone_duration_qc_issues
     assert bool(_phone_duration_qc_issues((phone(start, end),))) is expected
+
+
+def test_energy_refinement_extends_vowel_into_mfa_tail_silence(tmp_path: Path) -> None:
+    """A loud vowel tail assigned to explicit MFA silence must retain its speech owner."""
+    from japanmfa.mfa.textgrid import MfaAlignment, MfaPhone, MfaWord
+
+    audio = tmp_path / "tail.wav"
+    samples = array.array("h", (
+        int((3000 if .5 <= i / 16000 < .9 else 10000 if .9 <= i / 16000 < 1.2 else 0)
+            * math.sin(2 * math.pi * 200 * i / 16000))
+        for i in range(round(1.5 * 16000))
+    ))
+    with wave.open(str(audio), "wb") as out:
+        out.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+        out.writeframes(samples.tobytes())
+    leading = PhoneAnnotation(PhoneInterval(0., .5, ""), None, (), "", "", True)
+    vowel = phone(.5, .9)
+    trailing = PhoneAnnotation(PhoneInterval(.9, 1.5, ""), None, (), "", "", True)
+    alignment = MfaAlignment(
+        words=(MfaWord("jmfa_000000", .5, .9),),
+        phones=(MfaPhone("", 0., .5, None, True),
+                MfaPhone("a", .5, .9, "jmfa_000000", False),
+                MfaPhone("", .9, 1.5, None, True)),
+        diagnostic_intervals=(),
+    )
+    result = postprocess_annotations(audio, 1.5, (leading, vowel, trailing), mfa_alignment=alignment)
+    assert result.report["passed"]
+    assert result.report["bgm_suspects"] == []
+    assert result.annotations[1].interval.end == pytest.approx(1.2, abs=.02)
+    assert result.annotations[2].interval.start == result.annotations[1].interval.end
+    assert any(edit["reason"] == "energy_tail_extension" for edit in result.report["edits"])
+
+
+def test_energy_refinement_does_not_bridge_large_mfa_silence_error(tmp_path: Path) -> None:
+    """A separate sound burst far inside explicit silence needs a new alignment."""
+    from japanmfa.mfa.textgrid import MfaAlignment, MfaPhone, MfaWord
+
+    audio = tmp_path / "bad_alignment.wav"
+    write_wave(audio, ((.5, .8), (1.15, 1.22)), duration=1.5)
+    leading = PhoneAnnotation(PhoneInterval(0., 1.12, ""), None, (), "", "", True)
+    vowel = phone(1.12, 1.25)
+    trailing = PhoneAnnotation(PhoneInterval(1.25, 1.5, ""), None, (), "", "", True)
+    alignment = MfaAlignment(
+        words=(MfaWord("jmfa_000000", 1.12, 1.25),),
+        phones=(MfaPhone("", 0., 1.12, None, True),
+                MfaPhone("a", 1.12, 1.25, "jmfa_000000", False),
+                MfaPhone("", 1.25, 1.5, None, True)),
+        diagnostic_intervals=(),
+    )
+    result = postprocess_annotations(audio, 1.5, (leading, vowel, trailing), mfa_alignment=alignment)
+    assert result.report["reason_code"] == "bgm_suspect"
+    assert result.annotations[0].interval.end == 1.12
+    assert result.annotations[1].interval.start == 1.12
+
+
+def test_bgm_audit_detects_sustained_burst_hidden_by_long_silence_average() -> None:
+    """Legacy 50 ms frame scan must see a speech-like island inside MFA silence."""
+    import numpy as np
+    from japanmfa.postprocess import _bgm_suspects
+
+    samples = np.zeros(2000, dtype=np.float32)
+    samples[500:1000] = .30
+    samples[1000:1300] = .06
+    leading = PhoneAnnotation(PhoneInterval(0., .5, ""), None, (), "", "", True)
+    speech = phone(.5, 1.)
+    trailing = PhoneAnnotation(PhoneInterval(1., 2., ""), None, (), "", "", True)
+    suspects = _bgm_suspects(samples, 1000, (leading, speech, trailing))
+    assert len(suspects) == 1
+    assert suspects[0]["details"][0]["xmin"] == 1.
+    assert suspects[0]["details"][0]["high_ratio"] >= .20

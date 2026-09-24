@@ -377,12 +377,23 @@ def build_word_intervals(
     tokens: Sequence[Token],
     aligned_words: Sequence[MfaWord],
     aliases: Sequence[str],
+    *, phone_annotations: Sequence[PhoneAnnotation] | None = None,
 ) -> tuple[tuple[tuple[float, float, str], ...], tuple[str, ...]]:
-    """Project source punctuation onto actual MFA word gaps, retaining untimed marks."""
+    """Project source punctuation onto MFA gaps after optional phone refinement."""
     if len(tokens) != len(aliases) or len(aligned_words) != len(aliases):
         raise ValueError("MFA word count differs from locked source token count")
     if not tokens or not 0 < duration < math.inf:
         raise ValueError("word projection requires positive duration and tokens")
+    if phone_annotations is not None:
+        refined: list[MfaWord] = []
+        for token, word in zip(tokens, aligned_words):
+            owned = [item.interval for item in phone_annotations
+                     if not item.is_silence and item.token_index == token.index]
+            if not owned:
+                raise ValueError("refined word has no phone owner")
+            refined.append(MfaWord(word.alias, min(item.start for item in owned),
+                                   max(item.end for item in owned)))
+        aligned_words = refined
     rows: list[tuple[float, float, str]] = []
     unplaced: list[str] = []
     cursor = 0.0

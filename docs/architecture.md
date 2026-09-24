@@ -14,7 +14,7 @@ scope.
   -> Japanese MFA G2P + occurrence aliases + locked dictionary
   -> MFA v3 validate/align -> final phone intervals
   -> mora-to-phone projection
-  -> immutable MFA phone projection + upstream structural/short-phone/BGM/word-energy QC
+  -> energy-supported silence/phone edge refinement + structural/short-phone/frame-BGM/word-energy QC
   -> six-tier TextGrid + processed WAV + JSON/manifest/summary
 ```
 
@@ -33,14 +33,17 @@ orchestrator process.
   katakana. A bad override fails the utterance rather than moving to another
   occurrence.
 - tdmelodic predicts accent from the locked reading but never changes it.
-- MFA G2P determines a single phone string for each occurrence alias. MFA
-  supplies phonetic boundaries; postprocessing never moves or splits those
-  boundaries. Uncovered gaps become canonical `<sp0>`–`<sp3>` owners.
+- MFA G2P supplies one or more checked phone strings for each occurrence
+  alias. MFA supplies phonetic boundaries; postprocessing moves only an
+  explicit silence/phone edge with nearby sustained energy and a confirmed
+  onset or decay. It never splits an MFA phone or changes a speech-to-speech
+  edge. Uncovered gaps become canonical `<sp0>`–`<sp3>` owners.
 - Projection checks the expected phone sequence and can only annotate each
   actual MFA phone; it does not subdivide a phone.
-- Structural and enabled QC failures are rejected without boundary mutation or
-  an MFA retry. CTC-timed energy refinement, Chinese word mutation, and CTC-gap
-  BGM checks remain explicitly blocked because their evidence is unavailable.
+- The BGM check scans 50 ms frames in the refined explicit silence intervals,
+  using the old pipeline's global noise-floor rule. Structural and enabled QC
+  failures are rejected without an MFA retry. CTC word anchors, Chinese word
+  mutation, and CTC-gap BGM checks remain blocked without timed evidence.
 - Output is published only after acoustic and six-tier structural checks pass.
 
 Each utterance has isolated artifacts and a manifest outcome (`aligned`,

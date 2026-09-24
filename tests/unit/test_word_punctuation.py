@@ -42,3 +42,20 @@ def test_punctuation_without_acoustic_gap_is_reported_without_time() -> None:
     rows, unplaced = build_word_intervals(2., source, tokens, words, ("jmfa_000000", "jmfa_000001"))
     assert rows == ((0., 1., "世界"), (1., 2., "大丈夫"))
     assert unplaced == ("、",)
+
+
+def test_words_follow_refined_phone_silence_boundary() -> None:
+    source = "ない。"
+    tokens = (Token(0, 0, 2, "ない", ("形容詞",), "ナイ", "sudachi"),)
+    words = (MfaWord("jmfa_000000", .5, .9),)
+    annotations = (
+        PhoneAnnotation(PhoneInterval(0., .5, "<sp1>"), None, (), "", "", True),
+        PhoneAnnotation(PhoneInterval(.5, 1.2, "i"), 0,
+                        (Mora(0, 0, "イ", "H"),), "イ", "HH", False),
+        PhoneAnnotation(PhoneInterval(1.2, 1.5, "<sp1>"), None, (), "", "", True),
+    )
+    rows, unplaced = build_word_intervals(
+        1.5, source, tokens, words, ("jmfa_000000",), phone_annotations=annotations,
+    )
+    assert rows == ((0., .5, "<sp1>"), (.5, 1.2, "ない"), (1.2, 1.5, "。"))
+    assert unplaced == ()

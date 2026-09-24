@@ -115,18 +115,18 @@ audit artifacts. The tiers are exactly:
 
 1. `original` — original source text with a leading `<sp1>`, one interval covering the complete audio;
 2. `kana` — complete locked katakana with a leading `<sp1>`, one interval covering the complete audio;
-3. `words` — MFA word intervals with source punctuation replacing real silent gaps;
-4. `phones` — MFA phone intervals, including silence;
-5. `phone_kana` — kana projected onto the exact MFA phone intervals;
+3. `words` — MFA word intervals updated at energy-refined silence edges, with source punctuation replacing real silent gaps;
+4. `phones` — MFA phone intervals with bounded energy refinement at explicit silence edges;
+5. `phone_kana` — kana projected onto the exact published phone intervals;
 6. `phone_tone` — `HH / LL / HL / LH` projected from the contributing morae.
 
-The `words` tier preserves MFA word spans and places source punctuation on real pause spans. Only the last three tiers share phone boundaries, including explicit silence.
-Structural, short-phone, BGM, and word-energy checks are audited in `postprocess.json`; MFA phone boundaries remain fixed.
+The `words` tier follows the refined phone owner at any adjusted silence edge and places source punctuation on real pause spans. The last three tiers share the same published phone boundaries, including explicit silence.
+Structural, short-phone, BGM, and word-energy checks are audited in `postprocess.json`; internal speech-to-speech MFA boundaries remain fixed.
 A long phone spanning H then L morae is labeled `HL`; no
 invented internal boundary is created. See [input/output](docs/input-output.md),
 [architecture](docs/architecture.md), and [accent mapping](docs/accent-mapping.md).
 
-The [September 24 upstream postprocess test report](docs/test-report-upstream-postprocess-20260924.md) records both full seven-item modes, actual output checks, and unresolved model failures. The [historical regression applicability ledger](docs/upstream-regression-applicability-20260923.md) tracks the old project issues.
+The [September 24 upstream postprocess test report](docs/test-report-upstream-postprocess-20260924.md) records the baseline full runs. The [energy boundary follow-up](docs/test-report-energy-boundary-20260924.md) records the refined reruns and remaining failed intervals. The [historical regression applicability ledger](docs/upstream-regression-applicability-20260923.md) tracks the old project issues.
 
 The [September 23 boundary repair report](docs/test-report-boundary-tone-20260923.md)
 includes the original failure, applicable ASRMFA--Pure postprocessing, and

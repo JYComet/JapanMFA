@@ -26,8 +26,8 @@ project-owned mono PCM16/16 kHz working copy consumed by every timestamp stage.
 |---|---|---|
 | `original` | one complete-utterance interval | original text exactly as supplied after a leading `<sp1>` marker |
 | `kana` | one complete-utterance interval | full locked katakana with display gaps preserved and a leading `<sp1>` marker |
-| `words` | MFA word intervals and actual positive-duration gaps | original Japanese token surfaces; original punctuation replaces a matching silence gap; otherwise canonical `<spN>` |
-| `phones` | immutable MFA intervals plus explicit canonical silence gaps | MFA phone labels, including `<sp0>`–`<sp3>` |
+| `words` | MFA word intervals updated at refined silence edges, plus actual positive-duration gaps | original Japanese token surfaces; original punctuation replaces a matching silence gap; otherwise canonical `<spN>` |
+| `phones` | MFA intervals with bounded silence-edge refinement and canonical silence gaps | MFA phone labels, including `<sp0>`–`<sp3>` |
 | `phone_kana` | byte-for-byte same boundaries as `phones` | mora/kana contribution, possibly `オ|ー` |
 | `phone_tone` | byte-for-byte same boundaries as `phones` | exactly `HH`, `LL`, `HL`, or `LH`; canonical `<sp0>`–`<sp3>` for silence |
 
@@ -37,10 +37,10 @@ sequence; projection accepts only an exact candidate and records all variants
 in the alias audit.
 
 The original and kana tiers are deliberately not split by token or phone. The
-words tier follows MFA word boundaries and uses source punctuation only where
-a real word gap exists. Untimed punctuation remains in original/kana and is
-listed in `postprocess.json.punctuation_unplaced`. The phone and its two
-auxiliary tiers follow MFA phone boundaries. Silence labels
+words tier follows MFA word boundaries, synchronized to any refined phone
+silence edge, and uses source punctuation only where a real word gap exists. Untimed punctuation remains in original/kana and
+is listed in `postprocess.json.punctuation_unplaced`. The phone and its two
+auxiliary tiers follow the published, possibly refined, phone boundaries. Silence labels
 have the same canonical silence label in all three lower tiers; every
 non-silence phone must have both labels.
 All three lower tiers partition the entire file, including positive-duration
@@ -50,8 +50,9 @@ silence-label configuration does not change this publication vocabulary.
 `alignment.json` stores that same partition plus the full per-phone mora trace.
 
 `postprocess.json` stores raw/final phone intervals, integer-tick structural
-issues, 15 ms short-phone issues, explicit-MFA-silence BGM suspects, raw MFA
-word/owned-phone energy evidence, and blocked upstream capabilities. Enabled
+issues, 15 ms short-phone issues, energy boundary edits, refined-silence
+frame-BGM suspects, raw MFA word/owned-phone energy evidence, and blocked
+upstream capabilities. Enabled
 QC failures produce diagnostics but no final TextGrid, processed WAV,
 `alignment.json`, `audio.json`, or completion marker. `audio.json` records
 source/working metadata and hashes; the published WAV is byte-identical to the

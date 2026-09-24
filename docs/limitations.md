@@ -11,10 +11,11 @@ Known limitations:
   `HH / LL / HL / LH`; these encode predicted mora accent, not measured F0.
   A phone with multiple pitch reversals fails `unsupported_tone_contour`.
 - Acoustic postprocessing adapts frame RMS, noise-floor estimation, sustained
-  activity detection, and nearby outer-edge refinement from ASRMFA--Pure.
-  It does not import Chinese/English lexical rules or arbitrary phone shifting.
-  Trims are bounded to 200 ms and extensions to 80 ms with 15 ms padding;
-  internal MFA speech-to-speech boundaries remain unchanged.
+  activity detection, and silence-edge refinement from ASRMFA--Pure. It moves
+  only an explicit silence/phone edge when a nearby onset or decay is measured;
+  the onset search is at most 120 ms and the tail scan at most 500 ms. Internal
+  MFA speech-to-speech boundaries remain unchanged. Longer misalignments need
+  independent word timing evidence or a new alignment.
 - Energy is not a speech classifier. Background music, breaths, very quiet
   speech and laughter can defeat these checks; a passed check establishes
   energy coverage and geometry, not correct transcription or every phone edge.

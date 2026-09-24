@@ -921,6 +921,7 @@ class JapanMFAPipeline:
                 )
             words, unplaced_punctuation = build_word_intervals(
                 duration, source.original, tokens, alignment.words, lexicon.aliases,
+                phone_annotations=annotations if processed.report["energy_boundary_refinement"]["edits"] else None,
             )
             processed.report["punctuation_unplaced"] = list(unplaced_punctuation)
             write_json(_safe_output_path(artifact_dir, "postprocess.json"), processed.report)
