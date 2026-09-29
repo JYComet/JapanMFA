@@ -31,7 +31,7 @@ Known limitations:
 - Compounds, proper names, numeric readings, abbreviations, and repeated
   surface forms may need explicit per-occurrence overrides. Compound-word
   handling remains a planned optimization rather than a silent correction.
-- The final `0922jap` run has exposed broader phone-map coverage work: item 01
+- An earlier `0922jap` run exposed broader phone-map coverage work: item 01
   reaches MFA but fails projection on its observed phone sequence, while item
   02 exposes `i` and item 05 exposes `tɕ`, `i`, `g`, `m`, and `ɨ`. Unknown
   phones remain explicit `unknown_phone` failures. Expanding the pinned map is
@@ -59,8 +59,22 @@ Known limitations:
   `resolved_config.yaml` records the effective commands for an acceptance run.
   CLI compatibility is locked to Click 8.1.8 for this environment; this is a
   reproducibility pin, not a claim of compatibility with every Click release.
-- Qwen3-ASR validates or supplies text but is not a timestamp source. MFA alone
-  determines final phone timing; Qwen3 Forced Aligner is not used.
+- Qwen3 ForcedAligner supplies lexical timestamps. Punctuation timestamps are
+  inferred from lexical gaps and can be zero-duration boundary points; they
+  are not independent acoustic punctuation predictions. Punctuation inside a
+  single Qwen lexical unit is retained as a `lexical_span` with uncertain
+  position across that unit. Valid lexical and
+  locked-token boundaries define MFA audio crops, including a single-word
+  utterance. Short or zero-width items merge with neighbors. Sustained sound
+  at a Qwen edge can add bounded MFA crop context. A group with more than 0.2
+  seconds of Qwen/MFA edge difference still fails unless that specific
+  difference has independent acoustic support and the other quality checks
+  pass. MFA still determines final phone timing; internal lexical words
+  inside a merged group are not independently audited against Qwen. The
+  earlier 0922jap real-model run did not use this timestamp path and must not
+  be read as its acceptance evidence. The
+  native Qwen3 ForcedAligner checkpoint is required; the old project's
+  converted `-hf` checkpoint is incompatible with the `qwen-asr` wrapper.
 - The accepted Qwen evidence is environment-deviant: it came from an isolated
   Python 3.10.20 / Torch 2.9.1+cu128 clone and requires the worktree
   `PYTHONPATH` because package metadata targets Python >=3.11. It cannot be

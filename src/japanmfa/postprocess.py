@@ -3,8 +3,10 @@
 Adapted concepts: ASRMFA--Pure scripts/audio_energy.py frame_rms,
 noise_floor_from_rms, speech_onset/speech_offset, and postprocess_textgrids.py
 find_speech_in_silence, at c2bcdf6ef81f67aa93bf1bf5e4bb5dbfc8278c85.
-Only energy-supported edges adjacent to explicit MFA silence are refined.
-All other MFA phone edges remain unchanged.
+Energy-supported edges adjacent to explicit MFA silence are refined. The
+first speech onset may also be pulled back within a synthetic leading gap when
+the energy shows a sustained onset; that gap is never added as explicit MFA
+silence. All other MFA phone edges remain unchanged.
 """
 
 from __future__ import annotations
@@ -276,12 +278,14 @@ def _collect_tier_discontinuities(tier: object, duration: float | None = None) -
 def _refine_silence_phone_boundaries(
     audio: np.ndarray, rate: int, annotations: tuple[PhoneAnnotation, ...],
 ) -> tuple[tuple[PhoneAnnotation, ...], list[dict[str, object]]]:
-    """Move only explicit silence/phone edges when 10 ms energy proves leakage.
+    """Refine silence-adjacent edges and a sustained onset in a leading gap.
 
     This is the Japanese phone-tier adaptation of the old pipeline's energy
     boundary stage: 15th-percentile noise, 3x/0.001 threshold, local windows,
-    and a visible energy drop/onset. It never crosses a separate silent run or
-    changes an internal phone/phone edge.
+    and a visible energy drop/onset. A synthetic leading gap is used only to
+    search for the first speech onset; no synthetic silence annotation is
+    added. Refinement never crosses a quiet break or changes an internal
+    phone/phone edge.
     """
     frame = max(1, int(.010 * rate))
     count = len(audio) // frame
@@ -291,65 +295,416 @@ def _refine_silence_phone_boundaries(
     rms = np.sqrt(np.mean(global_frames ** 2, axis=1) + 1e-12)
     noise = float(np.percentile(rms, 15))
     threshold = max(noise * 3.0, .001)
-    rows = list(annotations)
+    # Fill geometry only for the acoustic search.  Synthetic gap rows are
+    # discarded below so this function never claims they came from MFA.
+    rows: list[PhoneAnnotation] = []
+    synthetic_rows: set[int] = set()
+    source_indexes: list[int | None] = []
+    cursor = 0.0
+    if annotations and annotations[0].is_silence and annotations[0].interval.start > 1.0 / rate:
+        # A first explicit MFA silence can start after a synthetic leading
+        # gap. The quiet frames in that gap may be needed to locate onset.
+        rows.append(PhoneAnnotation(
+            PhoneInterval(0.0, annotations[0].interval.start, ""), None, (), "", "", True,
+        ))
+        synthetic_rows.add(0)
+        source_indexes.append(None)
+    for source_index, item in enumerate(annotations):
+        if rows and item.interval.start > cursor + 1.0 / rate:
+            synthetic_rows.add(len(rows))
+            rows.append(PhoneAnnotation(
+                PhoneInterval(cursor, item.interval.start, ""), None, (), "", "", True,
+            ))
+            source_indexes.append(None)
+        rows.append(item)
+        source_indexes.append(source_index)
+        cursor = item.interval.end
+    duration = len(audio) / rate
+    if cursor < duration - 1.0 / rate:
+        synthetic_rows.add(len(rows))
+        rows.append(PhoneAnnotation(
+            PhoneInterval(cursor, duration, ""), None, (), "", "", True,
+        ))
+        source_indexes.append(None)
+    elif cursor < duration:
+        # A sub-frame axis remainder is still usable as search support, while
+        # remaining synthetic in the returned stream.
+        synthetic_rows.add(len(rows))
+        rows.append(PhoneAnnotation(
+            PhoneInterval(cursor, duration, ""), None, (), "", "", True,
+        ))
+        source_indexes.append(None)
     edits: list[dict[str, object]] = []
+    silence_starts: dict[int, float] = {}
+    silence_ends: dict[int, float] = {}
 
-    def energy(start: float, end: float) -> np.ndarray:
+    def onset_after_quiet(values: np.ndarray) -> int | None:
+        # Prefer the transition nearest the aligned speech boundary. An
+        # earlier burst separated by quiet must not pull the phone across it.
+        return next((offset + 3 for offset in range(len(values) - 5, -1, -1)
+                     if np.all(values[offset:offset + 3] < threshold)
+                     and np.all(values[offset + 3:offset + 5] > threshold)), None)
+
+    def energy(start: float, end: float) -> tuple[int, np.ndarray]:
         first = max(0, min(count, int(math.ceil(start * rate / frame - 1e-9))))
         last = max(first, min(count, int(math.floor(end * rate / frame + 1e-9))))
-        return rms[first:last]
+        return first, rms[first:last]
+
+    def frame_time(index: int) -> float:
+        return round(index * frame / rate, 6)
+
+    def adjacent(left: PhoneAnnotation, right: PhoneAnnotation) -> bool:
+        return abs(left.interval.end - right.interval.start) <= 1.0 / rate
+
+    # An absent leading annotation is synthetic geometry. Use it only as an
+    # onset-search window and copy a justified edge onto speech; it never
+    # becomes explicit silence in the annotation stream.
+    if rows and not rows[0].is_silence and rows[0].interval.start >= .05:
+        first = rows[0]
+        old = first.interval.start
+        before_start = max(0.0, old - .12)
+        before_index, before = energy(before_start, old)
+        _, after = energy(old, min(first.interval.end, old + .03))
+        if len(before) >= 5 and len(after) >= 2 and np.all(after[:2] > threshold) and np.all(before[-2:] > threshold):
+            onset = onset_after_quiet(before)
+            if onset is not None:
+                boundary = frame_time(before_index + onset)
+                if old - boundary >= .02 and boundary >= .03:
+                    rows[0] = replace(first, interval=PhoneInterval(boundary, first.interval.end, first.interval.label))
+                    edits.append({"index": source_indexes[0], "reason": "energy_synthetic_leading_onset_pullback",
+                                  "before": old, "after": boundary,
+                                  "noise_floor": noise, "threshold": threshold})
 
     for index in range(len(rows) - 1):
         left, right = rows[index], rows[index + 1]
         old = left.interval.end
-        if abs(old - right.interval.start) > 1.0 / rate:
+        if not adjacent(left, right):
             continue
         if not left.is_silence and right.is_silence:
-            # Old word-end refinement looks for a real energy fall. Preserve
-            # the explicit silence if the scan has no sustained quiet region.
-            if old - left.interval.start < .015 or right.interval.end - old < .05:
+            # A very short internal MFA silence with continuous energy is a
+            # visual <sp0> gap, not a measured acoustic pause. Give it to the
+            # preceding vowel, matching backward sp0 publication ownership.
+            if (index + 2 < len(rows) and index + 1 not in synthetic_rows
+                    and 0 < right.interval.end - right.interval.start <= .05 + 1e-9
+                    and left.interval.label in {'a', 'e', 'i', 'o', 'u', 'ɯ', 'ɨ',
+                                                'aː', 'eː', 'iː', 'oː', 'uː', 'ɯː', 'ɨː'}
+                    and not rows[index + 2].is_silence
+                    and adjacent(right, rows[index + 2])):
+                _, before = energy(max(left.interval.start, old - .03), old)
+                _, during = energy(right.interval.start, right.interval.end)
+                following = rows[index + 2]
+                _, after = energy(following.interval.start,
+                                  min(following.interval.end, following.interval.start + .03))
+                if (len(before) >= 2 and len(during) >= 2 and len(after) >= 2
+                        and np.all(before[-2:] > threshold)
+                        and np.all(during > threshold)
+                        and np.all(after[:2] > threshold)):
+                    rows[index] = replace(left, interval=PhoneInterval(
+                        left.interval.start, right.interval.end, left.interval.label))
+                    silence_starts[index + 1] = right.interval.end
+                    edits.append({'index': source_indexes[index],
+                                  'reason': 'energy_short_sp0_backward',
+                                  'before': old, 'after': right.interval.end,
+                                  'threshold': threshold})
+                    continue
+            # Treat adjacent explicit silence fragments as one run. A short
+            # first fragment must not hide a longer contiguous MFA tail.
+            run_end_index = index + 1
+            while (run_end_index + 1 < len(rows) and rows[run_end_index + 1].is_silence
+                   and adjacent(rows[run_end_index], rows[run_end_index + 1])):
+                run_end_index += 1
+            run_end = rows[run_end_index].interval.end
+            synthetic_tail_only = (
+                run_end_index in synthetic_rows and run_end_index == len(rows) - 1
+                and run_end - old <= .12 + 1e-9
+            )
+            explicit_backing = any(
+                rows[silence_index].is_silence and silence_index not in synthetic_rows
+                for silence_index in range(index + 1, run_end_index + 1)
+            )
+            max_scan = .5 if explicit_backing else .12
+            if old - left.interval.start < .015 or (run_end - old < .05 and not synthetic_tail_only):
                 continue
-            before = energy(max(left.interval.start, old - .03), old)
-            after = energy(old, min(right.interval.end, old + .5))
+            _, before = energy(max(left.interval.start, old - .03), old)
+            after_limit = min(run_end, old + (.8 if explicit_backing else .12))
+            after_index, after = energy(old, after_limit)
             if len(before) < 2 or len(after) < 5 or not np.all(before[-2:] > threshold):
                 continue
             if not np.all(after[:2] > threshold):
                 continue
             quiet = next((offset for offset in range(2, len(after) - 2)
-                          if np.all(after[offset:offset + 3] < threshold)), None)
+                          if np.all(after[offset:offset + 3] < threshold)
+                          and frame_time(after_index + offset + 3) - old <= max_scan + 1e-9), None)
+            if quiet is None:
+                # Long tails need a continuous measured decay contour, not
+                # merely energy below half the boundary after 500 ms. The
+                # first three quiet frames still define the endpoint, so a
+                # later acoustic island is never consumed.
+                quiet = next((offset for offset in range(2, len(after) - 2)
+                              if np.all(after[offset:offset + 3] < threshold)), None)
+                decay_measurements: dict[str, float] | None = None
+                if quiet is not None:
+                    delay_frames = int(round(.5 * rate / frame))
+                    endpoint = after_index + quiet
+                    boundary_energy = float(np.mean(before[-2:]))
+                    smooth_from = after_index + delay_frames
+                    smooth_values = np.asarray([
+                        float(np.sqrt(np.mean(rms[pos:pos + 5] ** 2)))
+                        for pos in range(smooth_from, max(smooth_from, endpoint - 4))
+                        if pos + 5 <= count
+                    ])
+                    block_count = (endpoint - after_index) // 5
+                    block_rms = np.asarray([
+                        float(np.sqrt(np.mean(rms[pos:pos + 5] ** 2)))
+                        for pos in range(after_index, after_index + block_count * 5, 5)
+                    ])
+                    log_rms = np.log(np.maximum(block_rms, 1e-12))
+                    block_times = np.arange(len(block_rms), dtype=np.float64) * (5 * frame / rate)
+                    if len(block_rms) >= 2:
+                        slope, intercept = np.polyfit(block_times, log_rms, 1)
+                        predicted = slope * block_times + intercept
+                        residual = float(np.sum((log_rms - predicted) ** 2))
+                        total = float(np.sum((log_rms - np.mean(log_rms)) ** 2))
+                        r_squared = 1.0 - residual / total if total > 0.0 else 0.0
+                        end_ratio = float(block_rms[-1] / max(block_rms[0], 1e-12))
+                        adjacent_rises = block_rms[1:] / np.maximum(block_rms[:-1], 1e-12)
+                        max_rise = float(np.max(adjacent_rises)) if len(adjacent_rises) else 1.0
+                        decay_measurements = {
+                            "decay_slope_per_second": float(slope),
+                            "decay_r_squared": float(r_squared),
+                            "decay_end_to_start_ratio": end_ratio,
+                            "decay_max_adjacent_rise_ratio": max_rise,
+                        }
+                    decay_ok = (
+                        frame_time(endpoint) - old <= .8 + 1e-9
+                        and len(smooth_values) > 0
+                        and float(np.max(smooth_values)) < boundary_energy * .5
+                        and len(block_rms) >= 10
+                        and decay_measurements is not None
+                        and decay_measurements["decay_slope_per_second"] < 0.0
+                        and decay_measurements["decay_r_squared"] >= .8
+                        and decay_measurements["decay_end_to_start_ratio"] <= .1
+                        and decay_measurements["decay_max_adjacent_rise_ratio"] <= 1.5
+                    )
+                    if not decay_ok:
+                        quiet = None
             if quiet is None:
                 continue
-            boundary = round(old + quiet * frame / rate, 6)
-            if boundary - old < .02 or right.interval.end - boundary < .03:
+            boundary = frame_time(after_index + quiet)
+            if boundary - old < .02 or run_end - boundary < .03:
                 continue
             rows[index] = replace(left, interval=PhoneInterval(left.interval.start, boundary, left.interval.label))
-            rows[index + 1] = replace(right, interval=PhoneInterval(boundary, right.interval.end, right.interval.label))
-            edits.append({"index": index, "reason": "energy_tail_extension", "before": old,
-                          "after": boundary, "noise_floor": noise, "threshold": threshold})
+            for silence_index in range(index + 1, run_end_index + 1):
+                silence = rows[silence_index]
+                silence_starts[silence_index] = max(
+                    silence_starts.get(silence_index, silence.interval.start), boundary,
+                )
+            long_decay = boundary - old > .5 + 1e-9
+            edit: dict[str, object] = {
+                "index": source_indexes[index], "reason": "energy_tail_extension", "before": old,
+                "after": boundary, "noise_floor": noise, "threshold": threshold,
+                "support_mode": ("measured_decay_800ms" if long_decay else
+                                 "explicit_pause_500ms" if explicit_backing else "synthetic_tail_120ms"),
+                "source_pause_start": rows[index + 1].interval.start,
+                "source_pause_end": run_end,
+            }
+            if long_decay and decay_measurements is not None:
+                edit.update(decay_measurements)
+            edits.append(edit)
         elif left.is_silence and not right.is_silence:
             # The old silence-adjacent pull-back is bounded to 120 ms.
-            if old - left.interval.start < .05 or right.interval.end - old < .015:
+            run_start_index = index
+            while (run_start_index > 0 and rows[run_start_index - 1].is_silence
+                   and adjacent(rows[run_start_index - 1], rows[run_start_index])):
+                run_start_index -= 1
+            run_start = max(
+                [rows[run_start_index].interval.start]
+                + [silence_starts[silence_index]
+                   for silence_index in range(run_start_index, index + 1)
+                   if (silence_index in silence_starts
+                       and silence_starts[silence_index]
+                       > rows[silence_index].interval.start + 1.0 / rate)]
+            )
+            if old - run_start < .05 or right.interval.end - old < .015:
                 continue
-            before_start = max(left.interval.start, old - .12)
-            before = energy(before_start, old)
-            after = energy(old, min(right.interval.end, old + .03))
+            before_start = max(run_start, old - .12)
+            before_index, before = energy(before_start, old)
+            _, after = energy(old, min(right.interval.end, old + .03))
             if len(before) < 5 or len(after) < 2 or not np.all(after[:2] > threshold):
                 continue
             if not np.all(before[-2:] > threshold):
                 continue
-            onset = next((offset + 3 for offset in range(len(before) - 4)
-                          if np.all(before[offset:offset + 3] < threshold)
-                          and np.all(before[offset + 3:offset + 5] > threshold)), None)
+            onset = onset_after_quiet(before)
             if onset is None:
                 continue
-            boundary = round(before_start + onset * frame / rate, 6)
-            if old - boundary < .02 or boundary - left.interval.start < .03:
+            boundary = frame_time(before_index + onset)
+            if old - boundary < .02 or boundary - run_start < .03:
                 continue
-            rows[index] = replace(left, interval=PhoneInterval(left.interval.start, boundary, left.interval.label))
+            for silence_index in range(run_start_index, index + 1):
+                silence = rows[silence_index]
+                silence_ends[silence_index] = min(
+                    silence_ends.get(silence_index, silence.interval.end), boundary,
+                )
             rows[index + 1] = replace(right, interval=PhoneInterval(boundary, right.interval.end, right.interval.label))
-            edits.append({"index": index + 1, "reason": "energy_onset_pullback", "before": old,
+            edits.append({"index": source_indexes[index + 1], "reason": "energy_onset_pullback", "before": old,
                           "after": boundary, "noise_floor": noise, "threshold": threshold})
+    refined: list[PhoneAnnotation] = []
+    for index, row in enumerate(rows):
+        start = silence_starts.get(index, row.interval.start)
+        end = silence_ends.get(index, row.interval.end)
+        if row.is_silence and (start >= end or end <= row.interval.start):
+            continue
+        if start != row.interval.start or end != row.interval.end:
+            row = replace(row, interval=PhoneInterval(start, end, row.interval.label))
+        if index not in synthetic_rows:
+            refined.append(row)
+    return tuple(refined), edits
+
+
+def _trim_quiet_voiced_offsets(
+    audio: np.ndarray, rate: int, annotations: tuple[PhoneAnnotation, ...],
+) -> tuple[tuple[PhoneAnnotation, ...], list[dict[str, object]]]:
+    """Release short measured quiet tails from pause-adjacent voiced vowels.
+
+    Restrict to /a,e,o/: quiet /i,u/ can be devoicing and a quiet stop can be
+    closure. Internal phone boundaries and longer alignment errors need
+    phonetic evidence, so this only removes 20–80 ms of confirmed silence.
+    """
+    frame = max(1, round(.01 * rate))
+    count = len(audio) // frame
+    if count < 5:
+        return annotations, []
+    rms = np.sqrt(np.mean(audio[:count * frame].reshape(count, frame).astype(np.float64) ** 2, axis=1))
+    threshold = max(.001, 3 * float(np.percentile(rms, 15)))
+    step = frame / rate
+    rows = list(annotations)
+    edits = []
+    for index, row in enumerate(rows):
+        if row.is_silence or row.interval.label.replace('ː', '') not in {'a', 'e', 'o'}:
+            continue
+        old = row.interval.end
+        if index + 1 < len(rows):
+            following = rows[index + 1]
+            if not following.is_silence and following.interval.start <= old + 1. / rate:
+                continue
+        next_speech = next((p.interval.start for p in rows[index + 1:] if not p.is_silence), len(audio) / rate)
+        first = max(3, int(math.ceil(max(row.interval.start + .03, old - .08) / step - 1e-9)))
+        stop = min(count, int(math.floor(min(next_speech, old + .03) / step + 1e-9)))
+        for candidate in range(first, stop - 2):
+            boundary = round(candidate * step, 6)
+            if old - boundary < .02 - 1e-9 or next_speech - boundary < .03 - 1e-9:
+                continue
+            # Decay can dip below the floor for one frame before resuming;
+            # three consecutive quiet frames, not a single dip, end speech.
+            if ((candidate - 3) * step < row.interval.start - 1e-9
+                    or rms[candidate - 1] <= threshold
+                    or np.count_nonzero(rms[candidate - 3:candidate] > threshold) < 2
+                    or not np.all(rms[candidate:stop] < threshold)):
+                continue
+            rows[index] = replace(row, interval=PhoneInterval(row.interval.start, boundary, row.interval.label))
+            edits.append({'index': index, 'reason': 'energy_voiced_offset_trim',
+                          'before': old, 'after': boundary, 'threshold': threshold,
+                          'quiet_start': boundary, 'quiet_end': round(stop * step, 6),
+                          'quiet_max_rms': float(np.max(rms[candidate:stop]))})
+            break
     return tuple(rows), edits
+
+
+def _pause_acoustic_coverage(
+    audio: np.ndarray, rate: int, annotations: tuple[PhoneAnnotation, ...],
+    explicit_silence_spans: tuple[tuple[float, float], ...] = (),
+) -> dict[str, object]:
+    """Audit every continuous published pause against full 10 ms audio frames.
+
+    This matches ``tools/audit_textgrid_pauses.py``: two active frames at
+    either edge are immediately suspect, as is at least 150 ms active total
+    with an 80 ms continuous run. Source overlap arrays preserve the raw MFA
+    explicit-silence spans; the complement is synthetic geometry.
+    """
+    frame = max(1, int(round(.010 * rate)))
+    count = len(audio) // frame
+    if count == 0:
+        return {"frame_seconds": frame / rate, "threshold": .02,
+                "pauses": [], "active_ranges": [], "suspect_pauses": []}
+    frames = audio[:count * frame].reshape(count, frame).astype(np.float64)
+    rms = np.sqrt(np.mean(frames ** 2, axis=1))
+    starts = np.arange(count) * frame / rate
+    ends = starts + frame / rate
+    speech_mask = np.zeros(count, dtype=bool)
+    pause_spans: list[list[float]] = []
+    for item in annotations:
+        if item.is_silence:
+            start, end = item.interval.start, item.interval.end
+            if pause_spans and abs(pause_spans[-1][1] - start) <= 1e-9:
+                pause_spans[-1][1] = end
+            else:
+                pause_spans.append([start, end])
+        else:
+            speech_mask |= ((starts >= item.interval.start - 1e-9)
+                            & (ends <= item.interval.end + 1e-9))
+    reference = float(np.median(rms[speech_mask])) if np.any(speech_mask) else 0.0
+    threshold = max(.02, .25 * reference)
+    active_ranges: list[dict[str, float]] = []
+    pauses: list[dict[str, object]] = []
+    for start, end in pause_spans:
+        selected = (starts >= start - 1e-9) & (ends <= end + 1e-9)
+        values = rms[selected]
+        positions = starts[selected]
+        active = values > threshold
+        longest = run = 0
+        for value in active:
+            run = run + 1 if value else 0
+            longest = max(longest, run)
+        active_seconds = round(int(np.count_nonzero(active)) * frame / rate, 6)
+        longest_seconds = round(longest * frame / rate, 6)
+        active_edge = len(active) >= 2 and (bool(np.all(active[:2])) or bool(np.all(active[-2:])))
+        indices = np.flatnonzero(active)
+        ranges: list[dict[str, float]] = []
+        if len(indices):
+            range_start = int(indices[0])
+            prior = range_start
+            for index in indices[1:]:
+                index = int(index)
+                if index != prior + 1:
+                    entry = {"start": round(float(positions[range_start]), 6),
+                             "end": round(float(positions[prior] + frame / rate), 6)}
+                    ranges.append(entry)
+                    active_ranges.append(entry | {"pause_start": start, "pause_end": end})
+                    range_start = index
+                prior = index
+            entry = {"start": round(float(positions[range_start]), 6),
+                     "end": round(float(positions[prior] + frame / rate), 6)}
+            ranges.append(entry)
+            active_ranges.append(entry | {"pause_start": start, "pause_end": end})
+        explicit_overlaps = [
+            [round(max(start, source_start), 6), round(min(end, source_end), 6)]
+            for source_start, source_end in explicit_silence_spans
+            if min(end, source_end) > max(start, source_start)
+        ]
+        explicit_overlaps.sort()
+        synthetic_overlaps: list[list[float]] = []
+        cursor = start
+        for overlap_start, overlap_end in explicit_overlaps:
+            if overlap_start > cursor + 1e-9:
+                synthetic_overlaps.append([round(cursor, 6), round(overlap_start, 6)])
+            cursor = max(cursor, overlap_end)
+        if cursor < end - 1e-9:
+            synthetic_overlaps.append([round(cursor, 6), round(end, 6)])
+        suspect = active_edge or (active_seconds >= .15 and longest_seconds >= .08)
+        pauses.append({
+            "start": start, "end": end,
+            "max_rms": float(np.max(values)) if len(values) else 0.0,
+            "active_seconds": active_seconds,
+            "longest_active_seconds": longest_seconds,
+            "active_edge": active_edge, "active_ranges": ranges,
+            "explicit_source_overlaps": explicit_overlaps,
+            "synthetic_source_overlaps": synthetic_overlaps,
+            "suspect": suspect,
+        })
+    return {"frame_seconds": frame / rate, "threshold": threshold,
+            "speech_reference_median": reference, "pauses": pauses,
+            "active_ranges": active_ranges,
+            "suspect_pauses": [pause for pause in pauses if pause["suspect"]]}
 
 
 def _bgm_suspects(
@@ -526,6 +881,58 @@ def _rms_frames_in_span(audio: np.ndarray, rate: int, start: float, end: float,
     return np.asarray(values, dtype=np.float32), positions
 
 
+def _synthetic_silence_speech_regions(
+    audio: np.ndarray, rate: int, annotations: tuple[PhoneAnnotation, ...],
+    explicit_silence_spans: tuple[tuple[float, float], ...],
+) -> list[dict[str, float]]:
+    """Find sustained speech-level energy in gaps created outside MFA crops."""
+    speech_frames = [
+        _rms_frames_in_span(audio, rate, item.interval.start, item.interval.end)[0]
+        for item in annotations if not item.is_silence
+    ]
+    speech_frames = [values for values in speech_frames if len(values)]
+    speech_level = float(np.median(np.concatenate(speech_frames))) if speech_frames else 0.0
+    threshold = max(.02, .25 * speech_level)
+    found: list[dict[str, float]] = []
+    for item in annotations:
+        if not item.is_silence:
+            continue
+        parts = [(item.interval.start, item.interval.end)]
+        for explicit_start, explicit_end in explicit_silence_spans:
+            remaining = []
+            for start, end in parts:
+                if explicit_end <= start or explicit_start >= end:
+                    remaining.append((start, end))
+                    continue
+                if start < explicit_start:
+                    remaining.append((start, explicit_start))
+                if explicit_end < end:
+                    remaining.append((explicit_end, end))
+            parts = remaining
+        for start, end in parts:
+            if end - start < .15:
+                continue
+            values, frames = _rms_frames_in_span(audio, rate, start, end)
+            active = values > threshold
+            if int(np.count_nonzero(active)) < 15:
+                continue
+            longest = 0
+            current = 0
+            for value in active:
+                current = current + 1 if value else 0
+                longest = max(longest, current)
+            if longest < 8:
+                continue
+            indices = np.flatnonzero(active)
+            found.append({
+                "xmin": frames[int(indices[0])][0], "xmax": frames[int(indices[-1])][1],
+                "silence_start": start, "silence_end": end,
+                "active_duration": round(int(np.count_nonzero(active)) * .01, 3),
+                "threshold": threshold,
+            })
+    return found
+
+
 def _word_energy_noise_model(audio: np.ndarray, rate: int,
                              silence_spans: tuple[tuple[float, float], ...]) -> dict[str, float | str | int | None]:
     values_list: list[float] = []
@@ -692,8 +1099,10 @@ def postprocess_annotations(
 ) -> PostprocessResult:
     """Run upstream-compatible evidence audits and fill only uncovered gaps.
 
-    Existing MFA phone boundaries remain unchanged. Rejected candidates are
-    returned for diagnostics only, never publication.
+    MFA phone boundaries move only where 10 ms energy supports a transition
+    next to explicit silence or at the first speech onset in a synthetic
+    leading gap. Rejected candidates are returned for diagnostics only, never
+    publication.
     """
     try:
         with wave.open(str(audio_path), "rb") as stream:
@@ -724,6 +1133,9 @@ def postprocess_annotations(
     audio = np.asarray(samples, dtype=np.float32) / 32768.0
     adjusted, energy_edits = _refine_silence_phone_boundaries(audio, rate, tuple(adjusted))
     edits.extend(energy_edits)
+    adjusted, offset_edits = _trim_quiet_voiced_offsets(audio, rate, adjusted)
+    edits.extend(offset_edits)
+    energy_edits.extend(offset_edits)
     complete_phone_partition(duration, adjusted)
 
     size = max(1, round(rate * .005))
@@ -791,6 +1203,17 @@ def postprocess_annotations(
     )
     if report["passed"] and report["unowned_speech_regions"]:
         report.update(passed=False, reason_code="alignment_acoustic_coverage")
+    report["synthetic_silence_speech_regions"] = (
+        _synthetic_silence_speech_regions(audio, rate, completed, refined_silence_spans)
+        if mfa_alignment is not None else []
+    )
+    if report["passed"] and report["synthetic_silence_speech_regions"]:
+        report.update(passed=False, reason_code="alignment_acoustic_coverage")
+    report["pause_acoustic_coverage"] = _pause_acoustic_coverage(
+        audio, rate, completed, raw_silence_spans,
+    )
+    if report["pause_acoustic_coverage"]["suspect_pauses"]:  # type: ignore[index]
+        report.update(passed=False, reason_code="alignment_acoustic_coverage")
     report["word_energy_audit"] = _word_energy_audit(
         np.asarray(samples, dtype=np.float32) / 32768.0, rate, mfa_alignment,
         enabled=enable_word_in_silence_filter,
@@ -804,7 +1227,7 @@ def postprocess_annotations(
     report["blocked_upstream_capabilities"] = [
         {"capability": "_refine_boundaries_by_energy_full_word", "reason": "only explicit silence/phone edges are adapted; timed CTC lexical/punctuation evidence unavailable"},
         {"capability": "CTC_word_boundary_snap", "reason": "timed CTC lexical/punctuation evidence unavailable"},
-        {"capability": "merge_short_silences", "reason": "would delete retained MFA phone ownership"},
+        {"capability": "merge_short_silences_raw", "reason": "raw acoustic owners remain unchanged; safe internal sp0 visual merges run during publication"},
         {"capability": "fix_short_words", "reason": "Chinese lexical boundary mutation is not applicable"},
         {"capability": "CTC_gap_BGM", "reason": "exact CTC gap evidence unavailable"},
     ]

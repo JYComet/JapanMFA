@@ -1,11 +1,13 @@
 asr:
   model: Qwen/Qwen3-ASR-1.7B
   fallback_model: Qwen/Qwen3-ASR-0.6B
+  aligner_model: Qwen/Qwen3-ForcedAligner-0.6B
   language: Japanese
 
 mfa:
   acoustic_model: japanese_mfa
   g2p_model: japanese_mfa
+  dither: 1.0
 
 audio:
   sample_rate: 16000

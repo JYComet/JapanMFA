@@ -342,7 +342,10 @@ def test_preflight_uses_longer_bound_only_for_qwen_probes(
     fake = _fake(tmp_path)
     model = tmp_path / "qwen-model"
     model.mkdir()
+    (model / "config.json").write_text('{"thinker_config": {"model_type": "qwen3_forced_aligner"}}', encoding="utf-8")
+    (model / "model.safetensors").write_bytes(b"fake")
     monkeypatch.setenv("JAPANMFA_ASR_MODEL_PATH", str(model))
+    monkeypatch.setenv("JAPANMFA_ALIGNER_MODEL_PATH", str(model))
     monkeypatch.setenv("JAPANMFA_REQUIRE_CUDA", "1")
     monkeypatch.setenv("JAPANMFA_TDMELODIC_COMMAND", f"{sys.executable} {fake} tdmelodic")
     calls: list[tuple[tuple[str, ...], float]] = []
@@ -498,7 +501,10 @@ def test_valid_setup_has_individual_passes_and_json_contract(tmp_path: Path, mon
     fake = _fake(tmp_path)
     model = tmp_path / "qwen-model"
     model.mkdir()
+    (model / "config.json").write_text('{"thinker_config": {"model_type": "qwen3_forced_aligner"}}', encoding="utf-8")
+    (model / "model.safetensors").write_bytes(b"fake")
     monkeypatch.setenv("JAPANMFA_ASR_MODEL_PATH", str(model))
+    monkeypatch.setenv("JAPANMFA_ALIGNER_MODEL_PATH", str(model))
     monkeypatch.setenv("JAPANMFA_TDMELODIC_COMMAND", f"{sys.executable} {fake} tdmelodic")
     monkeypatch.delenv("JAPANMFA_REQUIRE_CUDA", raising=False)
 
@@ -510,3 +516,60 @@ def test_valid_setup_has_individual_passes_and_json_contract(tmp_path: Path, mon
     assert encoded["ok"] is True
     assert all(item["command"] is None or isinstance(item["command"], list) for item in encoded["checks"])
     assert "JAPANMFA_ASR_MODEL_PATH" not in report.to_json()
+
+
+def test_preflight_reports_missing_explicit_qwen_aligner_model(tmp_path: Path, monkeypatch) -> None:
+    fake = _fake(tmp_path)
+    monkeypatch.setenv("JAPANMFA_ALIGNER_MODEL_PATH", str(tmp_path / "missing-aligner"))
+    report = run_preflight(_config(tmp_path, fake))
+    check = _names(report)["qwen_aligner_model"]
+    assert not check.ok
+    assert check.reason_code == "model_unavailable"
+
+
+def test_preflight_rejects_incompatible_local_aligner_format(tmp_path: Path, monkeypatch) -> None:
+    fake = _fake(tmp_path)
+    model = tmp_path / "converted-aligner"
+    model.mkdir()
+    (model / "config.json").write_text('{"text_config": {}}', encoding="utf-8")
+    (model / "model.safetensors").write_bytes(b"fake")
+    monkeypatch.setenv("JAPANMFA_ALIGNER_MODEL_PATH", str(model))
+    check = _names(run_preflight(_config(tmp_path, fake)))["qwen_aligner_model"]
+    assert not check.ok
+    assert check.reason_code == "model_incompatible"
+
+
+def test_preflight_finds_project_native_aligner_without_environment_override(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import japanmfa.checks as checks
+
+    model = tmp_path / "native-aligner"
+    model.mkdir()
+    (model / "config.json").write_text('{"thinker_config": {"model_type": "qwen3_forced_aligner"}}', encoding="utf-8")
+    (model / "model.safetensors").write_bytes(b"fake")
+    monkeypatch.delenv("JAPANMFA_ALIGNER_MODEL_PATH", raising=False)
+    monkeypatch.setattr(checks, "_local_native_aligner_dir", lambda: model, raising=False)
+
+    result = checks._qwen_aligner_model(PipelineConfig())
+
+    assert result.ok
+
+
+def test_preflight_does_not_use_default_project_checkpoint_for_custom_aligner(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import japanmfa.checks as checks
+
+    model = tmp_path / "native-aligner"
+    model.mkdir()
+    (model / "config.json").write_text('{"thinker_config": {"model_type": "qwen3_forced_aligner"}}', encoding="utf-8")
+    (model / "model.safetensors").write_bytes(b"fake")
+    monkeypatch.delenv("JAPANMFA_ALIGNER_MODEL_PATH", raising=False)
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "empty-cache"))
+    monkeypatch.setattr(checks, "_local_native_aligner_dir", lambda: model)
+    config = replace(PipelineConfig(), asr=replace(PipelineConfig().asr, aligner_model="Qwen/custom"))
+
+    result = checks._qwen_aligner_model(config)
+
+    assert not result.ok

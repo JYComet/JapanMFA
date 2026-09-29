@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import unicodedata
 
-from japanmfa.domain import Mora, PhoneAnnotation, PhoneInterval
+from japanmfa.domain import Mora, PhoneAnnotation, PhoneInterval, Pronunciation, Token
 from japanmfa.errors import StageFailure
 from japanmfa.mfa.lexicon import LockedLexicon
 from japanmfa.mfa.phone_map import PhoneMap
@@ -111,6 +111,35 @@ def _match_morae_to_phones(
             cost=result.cost,
         )
     return result.mapping
+
+
+def filter_mappable_pronunciations(
+    tokens: tuple[Token, ...],
+    pronunciations: tuple[Pronunciation, ...],
+    token_morae: dict[int, tuple[Mora, ...]],
+    phone_map: PhoneMap,
+) -> tuple[Pronunciation, ...]:
+    """Keep only G2P candidates whose every locked mora has a phone owner."""
+    if len(tokens) != len(pronunciations):
+        raise _failure("pronunciation_count_mismatch", "tokens and G2P results differ in length")
+    selected: list[Pronunciation] = []
+    for token, pronunciation in zip(tokens, pronunciations):
+        compatible: list[tuple[str, ...]] = []
+        for candidate in (pronunciation.phones, *pronunciation.alternates):
+            try:
+                _match_morae_to_phones(token_morae[token.index], candidate, phone_map)
+            except StageFailure:
+                continue
+            compatible.append(candidate)
+        if not compatible:
+            raise _failure(
+                "no_mappable_pronunciation",
+                "no MFA G2P candidate covers every locked mora",
+                token_index=token.index, reading=token.reading,
+                candidates=[list(item) for item in (pronunciation.phones, *pronunciation.alternates)],
+            )
+        selected.append(Pronunciation(pronunciation.reading, compatible[0], tuple(compatible[1:])))
+    return tuple(selected)
 
 
 def _validate_token_morae(lexicon: LockedLexicon, token_morae: dict[int, tuple[Mora, ...]]) -> None:
@@ -232,4 +261,4 @@ def project_annotations(
     )
 
 
-__all__ = ["labels_for_phone", "project_annotations"]
+__all__ = ["filter_mappable_pronunciations", "labels_for_phone", "project_annotations"]

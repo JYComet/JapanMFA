@@ -50,7 +50,7 @@ def test_parse_accent_rejects_trailing_rise_without_a_following_mora() -> None:
         "カ[イ[ガ",  # two rises without a fall
         "カ[[イ",  # nested / repeated event at one boundary
         "カ]",  # an event after a low run has no valid transition
-        "カ[イ]ガ]",  # repeated fall after returning low
+        "カ]イ]ガ",  # repeated fall inside the word
     ],
 )
 def test_parse_accent_rejects_impossible_or_unmatched_events(marked: str) -> None:
@@ -76,3 +76,8 @@ def test_parse_accent_accepts_hiragana_marked_output_when_reading_matches() -> N
     result = parse_accent("きょ[う", locked("キョ", "ウ"))
 
     assert [m.tone for m in result] == ["L", "H"]
+
+
+def test_parse_accent_ignores_redundant_terminal_fall_after_low_mora() -> None:
+    # Pinned tdmelodic returns ネ]ツ] for 0922jap 0090 熱.
+    assert tones("ネ]ツ]", "ネ", "ツ") == ["H", "L"]

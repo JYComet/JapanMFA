@@ -15,7 +15,7 @@ runner = CliRunner()
 
 
 def test_public_cli_help_renders_without_typer_click_errors() -> None:
-    for arguments in (["--help"], ["run", "--help"], ["run-file", "--help"]):
+    for arguments in (["--help"], ["run", "--help"], ["run-file", "--help"], ["asr-batch", "--help"]):
         result = runner.invoke(app, arguments)
 
         assert result.exit_code == 0, result.exception
@@ -215,3 +215,35 @@ def test_check_prints_failed_preflight_and_returns_nonzero(
     assert result.exit_code == 1
     assert json.loads(result.stdout)["ok"] is False
     assert "model_unavailable" in result.stdout
+
+
+def test_asr_batch_cli_invokes_exporter_with_batch_options(tmp_path: Path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    output = tmp_path / "output"
+    config = tmp_path / "config.yaml"
+    overrides = tmp_path / "overrides.yaml"
+    _config(config)
+    overrides.write_text("utterances: {}\n", encoding="utf-8")
+
+    class FakeRunner:
+        def __init__(self, pipeline_config):
+            assert pipeline_config.asr.language == "Japanese"
+
+        def run(self, input_root, output_root, *, limit, overrides_path):
+            assert input_root == source
+            assert output_root == output
+            assert limit == 2
+            assert overrides_path == overrides
+            return type("Result", (), {
+                "summary_path": output / "summary.json",
+                "summary": {"counts": {"transcribed": 2, "skipped": 0, "failed": 0}},
+            })()
+
+    monkeypatch.setattr("japanmfa.cli.ASRBatchRunner", FakeRunner, raising=False)
+    result = runner.invoke(app, [
+        "asr-batch", "--input", str(source), "--output", str(output),
+        "--config", str(config), "--overrides", str(overrides), "--limit", "2",
+    ])
+    assert result.exit_code == 0, result.exception
+    assert "transcribed" in result.output

@@ -11,6 +11,7 @@ from typing import Annotated, Any
 
 import typer
 
+from .asr.batch import ASRBatchRunner
 from .config import PipelineConfig
 from .errors import StageFailure
 from .pipeline import JapanMFAPipeline
@@ -66,6 +67,28 @@ def run(
     except StageFailure as exc:
         typer.echo(f"batch setup failure: {exc.reason_code}: {exc.message}", err=True)
         raise typer.Exit(code=1)
+    except (OSError, ValueError, RuntimeError) as exc:
+        typer.echo(f"setup failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("asr-batch")
+def asr_batch(
+    input_root: Annotated[Path, typer.Option("--input", exists=True, file_okay=False, dir_okay=True)],
+    output_root: Annotated[Path, typer.Option("--output", file_okay=False, dir_okay=True)],
+    config: Annotated[Path, typer.Option("--config", exists=True, dir_okay=False)] = Path("configs/default.yaml"),
+    overrides: Annotated[Path | None, typer.Option("--overrides", exists=True, dir_okay=False)] = None,
+    limit: Annotated[int | None, typer.Option("--limit", min=1)] = None,
+) -> None:
+    """Export silence-normalized audio, ASR text, and timed Japanese word kana."""
+    try:
+        batch = ASRBatchRunner(PipelineConfig.load(config.resolve()))
+        result = batch.run(input_root, output_root, limit=limit, overrides_path=overrides)
+        typer.echo(f"summary: {result.summary_path}")
+        typer.echo(json.dumps(result.summary, ensure_ascii=False, sort_keys=True))
+    except StageFailure as exc:
+        typer.echo(f"batch setup failure: {exc.reason_code}: {exc.message}", err=True)
+        raise typer.Exit(code=1) from exc
     except (OSError, ValueError, RuntimeError) as exc:
         typer.echo(f"setup failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc

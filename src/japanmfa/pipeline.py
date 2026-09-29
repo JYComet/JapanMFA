@@ -22,7 +22,7 @@ from typing import Any, Mapping
 
 from .accent.parser import parse_accent
 from .accent.tdmelodic import AccentRequest, TdmelodicClient, resolve_tdmelodic_command
-from .asr.qwen3 import ASRResult, Qwen3ASRClient
+from .asr.qwen3 import ASRResult, Qwen3ASRClient, Timestamp
 from .audio import AudioInfo, AudioNormalizer
 from .cache import StageCache, stage_fingerprint
 from .config import PipelineConfig
@@ -48,6 +48,8 @@ from .mfa.g2p import MfaG2pClient
 from .mfa.lexicon import LockedLexicon
 from .mfa.phone_map import PhoneMap
 from .mfa.runner import MfaRunner
+from .mfa.timed import TimedSegment, align_timed_segments, expand_timed_segments_with_audio, plan_timed_segments
+from .mfa.timing_review import review_processed_timing
 from .mfa.textgrid import MfaAlignment, parse_mfa_textgrid
 from .output.reports import (
     _redact_string,
@@ -57,8 +59,8 @@ from .output.reports import (
     write_json,
     write_yaml,
 )
-from .output.textgrid import build_word_intervals, validate_five_tier_textgrid, write_five_tier_textgrid
-from .projection import project_annotations
+from .output.textgrid import build_word_intervals, merge_internal_sp0_backward, publication_internal_ellipsis, publication_phone_partition, publication_terminal_text, validate_five_tier_textgrid, write_five_tier_textgrid
+from .projection import filter_mappable_pronunciations, project_annotations
 from .postprocess import PostprocessResult, annotation_rows, postprocess_annotations
 
 
@@ -227,6 +229,7 @@ def _publish_final_outputs(
     staged_audio_json = staging / final_audio_json.name
     staged_marker = staging / complete_marker.name
     try:
+        annotations = publication_phone_partition(duration, annotations, words=words)
         write_five_tier_textgrid(staged_grid, duration, source, kana, annotations, words=words)
         validate_five_tier_textgrid(staged_grid, duration, silence_labels)
         write_json(
@@ -399,6 +402,7 @@ def _resolved_config_payload(
     tdmelodic_command: tuple[str, ...],
 ) -> dict[str, object]:
     asr_model_path = os.environ.get("JAPANMFA_ASR_MODEL_PATH")
+    aligner_model_path = os.environ.get("JAPANMFA_ALIGNER_MODEL_PATH")
     require_cuda_raw = os.environ.get("JAPANMFA_REQUIRE_CUDA", "0")
     require_cuda = require_cuda_raw.casefold() in {"1", "true", "yes"}
     return {
@@ -412,6 +416,7 @@ def _resolved_config_payload(
             "asr": {
                 "model": config.asr.model,
                 "fallback_model": config.asr.fallback_model,
+                "aligner_model": config.asr.aligner_model,
                 "language": config.asr.language,
             },
             "mfa": {
@@ -450,6 +455,7 @@ def _resolved_config_payload(
                 "model_path": asr_model_path,
             },
             "asr_fallback": {"configured_id": config.asr.fallback_model},
+            "qwen_aligner": {"configured_id": config.asr.aligner_model, "model_path": aligner_model_path},
             "mfa_acoustic": config.mfa.acoustic_model,
             "mfa_g2p": config.mfa.g2p_model,
         },
@@ -572,7 +578,7 @@ class JapanMFAPipeline:
 
     def _defaults(self, artifact_dir: Path) -> tuple[Any, ...]:
         audio = self.audio_normalizer or AudioNormalizer(self.config)
-        asr = self.asr_client or Qwen3ASRClient(self.config.commands.asr_worker, self.config.asr.model)
+        asr = self.asr_client or Qwen3ASRClient(self.config.commands.asr_worker, self.config.asr.model, self.config.asr.aligner_model)
         frontend = self.frontend or JapaneseFrontend()
         accent = self.accent_client or TdmelodicClient(resolve_tdmelodic_command())
         g2p = self.g2p_client or MfaG2pClient(self.config.commands.mfa, self.config.mfa.g2p_model)
@@ -756,6 +762,9 @@ class JapanMFAPipeline:
                     "audio": utterance.audio_path,
                     "text": utterance.text_path,
                     "model": self.config.asr.model,
+                    "aligner_model": self.config.asr.aligner_model,
+                    "source_revision": "qwen-forced-align-timestamps-v1",
+                    "working_audio_sha256": audio_info.working_sha256,
                     "adapter": _adapter_id(asr),
                 },
             )
@@ -766,7 +775,7 @@ class JapanMFAPipeline:
                     source = load_source_text(utterance.text_path)
                     if asr is not None:
                         try:
-                            asr_result = asr.transcribe([audio_info.working_path]).get(audio_info.working_path)
+                            asr_result = asr.transcribe([audio_info.working_path], reference_texts={audio_info.working_path: source.original}).get(audio_info.working_path)
                         except StageFailure as exc:
                             if exc.stage == "asr" and exc.reason_code == "non_japanese_language":
                                 raise SkipUtterance("non_japanese_language", exc.message, exc.details) from exc
@@ -793,13 +802,26 @@ class JapanMFAPipeline:
                         "model": asr_result.model,
                         "language": asr_result.language,
                         "text": asr_result.text,
+                        "aligner_model": asr_result.aligner_model,
+                        "alignment_text": asr_result.alignment_text,
+                        "lexical_timestamps": [vars(item) for item in asr_result.lexical_timestamps],
+                        "punctuation_timestamps": [vars(item) for item in asr_result.punctuation_timestamps],
                     },
                 }
 
             source_payload = cache.load_or_run("source", source_fp, produce_source)
             source = SourceText(str(source_payload["original"]), str(source_payload["processing"]), str(source_payload["source"]))  # type: ignore[arg-type]
             asr_payload = source_payload.get("asr")
-            asr_result = None if asr_payload is None else ASRResult(audio_info.working_path, str(asr_payload["language"]), str(asr_payload["text"]), str(asr_payload["model"]))
+            asr_result = None if asr_payload is None else ASRResult(
+                audio_info.working_path,
+                str(asr_payload["language"]),
+                str(asr_payload["text"]),
+                str(asr_payload["model"]),
+                asr_payload.get("aligner_model"),
+                asr_payload.get("alignment_text"),
+                tuple(Timestamp(**item) for item in asr_payload.get("lexical_timestamps", [])),
+                tuple(Timestamp(**item) for item in asr_payload.get("punctuation_timestamps", [])),
+            )
             durations["source"] = time.monotonic() - stage_started
             write_json(
                 _safe_output_path(artifact_dir, "asr.json"),
@@ -807,6 +829,10 @@ class JapanMFAPipeline:
                     "model": None if asr_result is None else asr_result.model,
                     "language": None if asr_result is None else asr_result.language,
                     "text": None if asr_result is None else asr_result.text,
+                    "aligner_model": None if asr_result is None else asr_result.aligner_model,
+                    "alignment_text": None if asr_result is None else asr_result.alignment_text,
+                    "lexical_timestamps": [] if asr_result is None else [vars(item) for item in asr_result.lexical_timestamps],
+                    "punctuation_timestamps": [] if asr_result is None else [vars(item) for item in asr_result.punctuation_timestamps],
                     "source": source.source,
                     "authoritative_text": source.original,
                     "validation": "not_run" if asr_result is None else "language_checked",
@@ -868,6 +894,7 @@ class JapanMFAPipeline:
 
             g2p_payload = cache.load_or_run("g2p", g2p_fp, produce_g2p)
             pronunciations = tuple(Pronunciation(str(item["reading"]), tuple(str(phone) for phone in item["phones"]), tuple(tuple(str(phone) for phone in variant) for variant in item.get("alternates", []))) for item in g2p_payload["pronunciations"])
+            pronunciations = filter_mappable_pronunciations(tokens, pronunciations, toned_morae, phone_map)
             lexicon = LockedLexicon.build(utterance.utterance_id, tokens, pronunciations)
             mfa_root = _ensure_output_directory(artifact_dir, "mfa")
             corpus_dir = _ensure_output_directory(mfa_root, "corpus")
@@ -886,10 +913,44 @@ class JapanMFAPipeline:
             mfa_work = _safe_output_path(mfa_root, "work")
             _reject_symlink_components(mfa_output)
             _reject_symlink_components(mfa_work)
-            raw_grid = mfa.align(corpus_dir, dictionary_path, mfa_output, mfa_work)
-            alignment = parse_mfa_textgrid(Path(raw_grid), frozenset(self.config.validation.silence_labels))
+            working_duration = (
+                audio_info.working_frames / audio_info.working_sample_rate
+                if audio_info.working_frames and audio_info.working_sample_rate else audio_info.duration
+            )
+            qwen_timed = asr_result is not None and asr_result.aligner_model is not None
+            segments = (
+                plan_timed_segments(source.original, asr_result.lexical_timestamps, tokens, working_duration)
+                if qwen_timed else (TimedSegment(0.0, working_duration, 0, len(tokens)),)
+            )
+            if qwen_timed:
+                segments = expand_timed_segments_with_audio(segments, audio_info.working_path)
+            if not qwen_timed:
+                raw_grid = Path(mfa.align(corpus_dir, dictionary_path, mfa_output, mfa_work))
+                alignment = parse_mfa_textgrid(raw_grid, frozenset(self.config.validation.silence_labels))
+                raw_grids = (raw_grid,)
+            else:
+                _reject_symlink_components(mfa_root / "segments")
+                alignment, raw_grids = align_timed_segments(
+                    segments, audio_info.working_path, utterance.utterance_id,
+                    lexicon.aliases, dictionary_path, mfa_root, mfa,
+                    frozenset(self.config.validation.silence_labels),
+                )
             durations["mfa"] = time.monotonic() - stage_started
-            write_json(_safe_output_path(artifact_dir, "mfa.json"), {"textgrid": str(raw_grid), "aliases": list(lexicon.aliases), "transcript": lexicon.transcript})
+            write_json(_safe_output_path(artifact_dir, "mfa.json"), {
+                "textgrid": str(raw_grids[0]) if len(raw_grids) == 1 else None,
+                "textgrids": [str(path) for path in raw_grids],
+                "timestamp_segments": [
+                    {
+                        "start": segment.start, "end": segment.end,
+                        "anchor_start": segment.anchor_start, "anchor_end": segment.anchor_end,
+                        "acoustic_start_limit": segment.acoustic_start_limit,
+                        "acoustic_end_limit": segment.acoustic_end_limit,
+                        "aliases": list(lexicon.aliases[segment.first_token:segment.last_token]),
+                    }
+                    for segment in segments
+                ],
+                "aliases": list(lexicon.aliases), "transcript": lexicon.transcript,
+            })
 
             current_stage = "projection"
             stage_started = time.monotonic()
@@ -903,6 +964,10 @@ class JapanMFAPipeline:
                 audio_info.working_path, duration, annotations,
                 mfa_alignment=alignment,
                 enable_word_in_silence_filter=self.config.validation.enable_word_in_silence_filter,
+            )
+            review_processed_timing(
+                processed.report, segments, alignment, processed.annotations,
+                tuple(token.index for token in tokens), audio_info.working_path,
             )
             write_json(_safe_output_path(artifact_dir, "postprocess.json"), processed.report)
             durations["postprocess"] = time.monotonic() - stage_started
@@ -921,8 +986,78 @@ class JapanMFAPipeline:
                 )
             words, unplaced_punctuation = build_word_intervals(
                 duration, source.original, tokens, alignment.words, lexicon.aliases,
-                phone_annotations=annotations if processed.report["energy_boundary_refinement"]["edits"] else None,
+                phone_annotations=annotations,
             )
+            publication_original, publication_kana, inferred_terminal_mark = publication_terminal_text(
+                source.original, kana, words,
+            )
+            if inferred_terminal_mark:
+                words, unplaced_punctuation = build_word_intervals(
+                    duration, publication_original, tokens, alignment.words, lexicon.aliases,
+                    phone_annotations=annotations,
+                )
+            merged_annotations, sp0_merges = merge_internal_sp0_backward(
+                duration, annotations, words,
+            )
+            if sp0_merges:
+                coverage = processed.report["pause_acoustic_coverage"]
+                pause_rows = coverage["pauses"]
+                evidenced_merges = []
+                for merge in sp0_merges:
+                    evidence = next((row for row in pause_rows
+                                     if row["start"] == merge["start"]
+                                     and row["end"] == merge["end"]), None)
+                    if evidence is None or evidence["suspect"]:
+                        raise StageFailure(
+                            "output", "sp0_acoustic_evidence_missing",
+                            "short-pause visual merge requires a checked acoustic pause",
+                        )
+                    evidenced_merges.append(dict(merge, acoustic={
+                        "max_rms": evidence["max_rms"],
+                        "active_seconds": evidence["active_seconds"],
+                        "threshold": coverage["threshold"],
+                    }))
+                annotations = merged_annotations
+                words, unplaced_punctuation = build_word_intervals(
+                    duration, publication_original, tokens, alignment.words, lexicon.aliases,
+                    phone_annotations=annotations,
+                )
+                processed.report["publication_sp0_merges"] = evidenced_merges
+            else:
+                processed.report["publication_sp0_merges"] = []
+            publication_original, publication_kana, words, ellipses = publication_internal_ellipsis(
+                publication_original, publication_kana, tokens, words,
+            )
+            coverage = processed.report["pause_acoustic_coverage"]
+            evidenced_ellipses = []
+            for entry in ellipses:
+                evidence = next((row for row in coverage["pauses"]
+                                 if row["start"] == entry["start"]
+                                 and row["end"] == entry["end"]), None)
+                if evidence is None or evidence["suspect"]:
+                    raise StageFailure(
+                        "output", "ellipsis_acoustic_evidence_missing",
+                        "internal ellipsis requires a checked acoustic pause",
+                    )
+                evidenced_ellipses.append(dict(entry, acoustic={
+                    "max_rms": evidence["max_rms"],
+                    "active_seconds": evidence["active_seconds"],
+                    "threshold": coverage["threshold"],
+                }))
+            processed.report["publication_internal_ellipsis"] = evidenced_ellipses
+            partition = publication_phone_partition(duration, annotations, words=words)
+            if any(item.interval.label in {"<sp1>", "<sp2>", "<sp3>"}
+                   for item in partition[1:-1]):
+                raise StageFailure(
+                    "output", "internal_long_pause_unplaced",
+                    "internal sp1–sp3 pause has no matching word gap for ellipsis",
+                )
+            if _punctuation_groups(publication_original) != _punctuation_groups(publication_kana):
+                raise StageFailure(
+                    "output", "punctuation_publication_mismatch",
+                    "publication punctuation differs between original and kana",
+                )
+            processed.report["publication_terminal_punctuation"] = inferred_terminal_mark
             processed.report["punctuation_unplaced"] = list(unplaced_punctuation)
             write_json(_safe_output_path(artifact_dir, "postprocess.json"), processed.report)
             with wave.open(str(audio_info.working_path), "rb") as _working_stream:
@@ -934,8 +1069,8 @@ class JapanMFAPipeline:
                 final_grid,
                 final_alignment,
                 duration,
-                _with_sp1(source.original),
-                _with_sp1(kana),
+                _with_sp1(publication_original),
+                _with_sp1(publication_kana),
                 annotations,
                 frozenset(self.config.validation.silence_labels),
                 words=words,

@@ -70,14 +70,14 @@ class FakeAsr:
     def __init__(self, text: str = "今日は晴れ") -> None:
         self.text = text
 
-    def transcribe(self, paths: list[Path]) -> dict[Path, object]:
+    def transcribe(self, paths: list[Path], *, reference_texts=None) -> dict[Path, object]:
         from japanmfa.asr.qwen3 import ASRResult
 
         return {path: ASRResult(path, "Japanese", self.text, "fake") for path in paths}
 
 
 class NonJapaneseErrorAsr:
-    def transcribe(self, _paths: list[Path]) -> dict[Path, object]:
+    def transcribe(self, _paths: list[Path], *, reference_texts=None) -> dict[Path, object]:
         raise StageFailure("asr", "non_japanese_language", "Qwen detected English")
 
 
@@ -217,6 +217,8 @@ def test_fake_backends_write_valid_word_and_phone_tiers_and_reports(tmp_path: Pa
     ]
     assert [entry.label for entry in tiers[2].intervals] == ["今日"]
     assert all((artifact / name).is_file() for name in ("alignment.json", "frontend.json", "asr.json", "mfa.json"))
+    mfa_receipt = json.loads((artifact / "mfa.json").read_text(encoding="utf-8"))
+    assert mfa_receipt["timestamp_segments"][0]["aliases"] == ["jmfa_000000"]
     assert (artifact / "ok.wav").is_file()
     assert (artifact / "audio.json").is_file()
     marker = json.loads((artifact / ".japanmfa.complete").read_text(encoding="utf-8"))
@@ -234,7 +236,7 @@ def test_punctuation_groups_preserve_consecutive_source_order() -> None:
     assert _punctuation_groups("ー") == ()
 
 
-def test_unowned_audio_activity_is_diagnostic_only_without_boundary_movement(tmp_path: Path) -> None:
+def test_unowned_audio_activity_blocks_publication_without_boundary_movement(tmp_path: Path) -> None:
     class LateMfa(FakeMfa):
         def align(self, *args: object) -> Path:
             path = super().align(*args)
@@ -244,13 +246,15 @@ def test_unowned_audio_activity_is_diagnostic_only_without_boundary_movement(tmp
     corpus = tmp_path / "corpus"
     _write_audio(corpus, "late")
     result = _pipeline(mfa=LateMfa()).run(corpus, tmp_path / "output", None)
-    assert result.outcomes[0].status == "aligned"
+    assert result.outcomes[0].status == "failed"
+    assert result.outcomes[0].reason_code == "alignment_acoustic_coverage"
     artifact = tmp_path / "output" / "late"
     audit = json.loads((artifact / "postprocess.json").read_text())
     assert audit["structural_issues"]
-    assert (artifact / "late.TextGrid").exists()
-    assert (artifact / "alignment.json").exists()
-    assert (artifact / ".japanmfa.complete").exists()
+    assert audit["synthetic_silence_speech_regions"]
+    assert not (artifact / "late.TextGrid").exists()
+    assert not (artifact / "alignment.json").exists()
+    assert not (artifact / ".japanmfa.complete").exists()
 
 
 def test_successful_pipeline_records_per_phone_mora_tone_trace(tmp_path: Path) -> None:
@@ -293,9 +297,10 @@ def test_coverage_failure_is_not_retried_with_boundary_mutation(tmp_path: Path) 
     corpus = tmp_path / "corpus"
     _write_audio(corpus, "recover")
     result = _pipeline(mfa=RecoveryMfa()).run(corpus, tmp_path / "output", None)
-    assert result.outcomes[0].status == "aligned"
+    assert result.outcomes[0].status == "failed"
+    assert result.outcomes[0].reason_code == "alignment_acoustic_coverage"
     artifact = tmp_path / "output" / "recover"
-    assert (artifact / "alignment.json").exists()
+    assert not (artifact / "alignment.json").exists()
 
 
 def test_batch_writes_resolved_config_and_authoritative_asr_comparison(
@@ -427,3 +432,80 @@ def test_frontend_cache_keeps_occurrence_specific_reading_overrides_isolated(tmp
     second = (tmp_path / "output" / "second" / "frontend.json").read_text(encoding="utf-8")
     assert '"kana": "キョウは晴れ"' in first
     assert '"kana": "キョオは晴れ"' in second
+
+
+def test_qwen_timestamps_reach_asr_receipt_before_mfa(tmp_path: Path) -> None:
+    from japanmfa.asr.qwen3 import ASRResult, Timestamp
+
+    class TimedAsr(FakeAsr):
+        def transcribe(self, paths, *, reference_texts=None):
+            assert reference_texts == {paths[0]: "今日は、晴れ。"}
+            return {paths[0]: ASRResult(
+                paths[0], "Japanese", "今日は晴れ", "fake",
+                "Qwen/Qwen3-ForcedAligner-0.6B", "今日は、晴れ。",
+                (Timestamp("今日は", 0.1, 0.5), Timestamp("晴れ", 0.7, 1.0)),
+                (Timestamp("、", 0.5, 0.7, "lexical_gap"), Timestamp("。", 1.0, 1.0, "boundary_point")),
+            )}
+
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "timed", "今日は、晴れ。")
+    result = _pipeline(asr=TimedAsr()).run(corpus, tmp_path / "output", None)
+
+    # This fixture's frontend supplies only 今日; the timestamped source also
+    # contains は晴れ, so MFA must reject the incomplete locked token stream.
+    assert result.outcomes[0].status == "failed"
+    assert result.outcomes[0].reason_code == "timestamp_text_mismatch"
+    artifact = tmp_path / "output" / "timed"
+    asr_receipt = json.loads((artifact / "asr.json").read_text(encoding="utf-8"))
+    assert asr_receipt["punctuation_timestamps"][0] == {
+        "text": "、", "start": 0.5, "end": 0.7, "source": "lexical_gap"
+    }
+    assert (artifact / "mfa" / "corpus" / "timed.lab").read_text(encoding="utf-8") == "jmfa_000000\n"
+    assert (artifact / "mfa" / "corpus" / "timed.wav").is_file()
+    assert (artifact / "mfa" / "dictionary.dict").is_file()
+
+
+def test_main_pipeline_checks_qwen_timing_against_locked_mfa_text(tmp_path: Path) -> None:
+    from japanmfa.asr.qwen3 import ASRResult, Timestamp
+
+    class MismatchedTimedAsr(FakeAsr):
+        def transcribe(self, paths: list[Path], *, reference_texts=None) -> dict[Path, object]:
+            return {path: ASRResult(path, "Japanese", "今日は晴れ", "fake",
+                                    "fake-aligner", "今日は晴れ",
+                                    (Timestamp("世間", 0.1, 0.8),)) for path in paths}
+
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "timed")
+
+    result = _pipeline(asr=MismatchedTimedAsr()).run(corpus, tmp_path / "output", None)
+
+    assert result.outcomes[0].status == "failed"
+    assert result.outcomes[0].reason_code == "timestamp_text_mismatch"
+
+
+def test_native_qwen_crop_keeps_speech_outside_timestamp_anchor(tmp_path: Path) -> None:
+    from japanmfa.asr.qwen3 import ASRResult, Timestamp
+
+    class TimedAsr(FakeAsr):
+        def transcribe(self, paths, *, reference_texts=None):
+            return {paths[0]: ASRResult(
+                paths[0], "Japanese", "今日", "fake",
+                "Qwen/Qwen3-ForcedAligner-0.6B", "今日",
+                (Timestamp("今日", 0.2, 0.8),),
+            )}
+
+    class RecordingMfa(FakeMfa):
+        frames = 0
+
+        def align(self, corpus_dir, dictionary, output_dir, work_dir):
+            with wave.open(str(next(corpus_dir.glob("*.wav"))), "rb") as audio:
+                self.frames = audio.getnframes()
+            return super().align(corpus_dir, dictionary, output_dir, work_dir)
+
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "single", "今日")
+    mfa = RecordingMfa()
+
+    _pipeline(asr=TimedAsr(), mfa=mfa).run(corpus, tmp_path / "output", None)
+
+    assert mfa.frames == 16000

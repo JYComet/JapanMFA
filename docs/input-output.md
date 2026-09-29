@@ -24,30 +24,33 @@ project-owned mono PCM16/16 kHz working copy consumed by every timestamp stage.
 
 | Tier | Intervals | Label |
 |---|---|---|
-| `original` | one complete-utterance interval | original text exactly as supplied after a leading `<sp1>` marker |
-| `kana` | one complete-utterance interval | full locked katakana with display gaps preserved and a leading `<sp1>` marker |
-| `words` | MFA word intervals updated at refined silence edges, plus actual positive-duration gaps | original Japanese token surfaces; original punctuation replaces a matching silence gap; otherwise canonical `<spN>` |
-| `phones` | MFA intervals with bounded silence-edge refinement and canonical silence gaps | MFA phone labels, including `<sp0>`–`<sp3>` |
+| `original` | one complete-utterance interval | original text after a leading `<sp1>` marker; publication inserts `……` at unpunctuated internal sp1–sp3 gaps and `。` only for an unpunctuated real trailing pause |
+| `kana` | one complete-utterance interval | locked katakana with the same publication-only punctuation and leading `<sp1>` marker |
+| `words` | MFA word intervals updated at refined silence edges, plus actual positive-duration gaps | source punctuation on matching gaps; unpunctuated internal `<sp0>` extends the preceding word, while sp1–sp3 display `……` |
+| `phones` | MFA intervals with bounded silence-edge refinement and canonical silence gaps | MFA phone labels; the same pause punctuation as words; unpunctuated internal `<sp0>` extends the preceding phone |
 | `phone_kana` | byte-for-byte same boundaries as `phones` | mora/kana contribution, possibly `オ|ー` |
-| `phone_tone` | byte-for-byte same boundaries as `phones` | exactly `HH`, `LL`, `HL`, or `LH`; canonical `<sp0>`–`<sp3>` for silence |
+| `phone_tone` | byte-for-byte same boundaries as `phones` | exactly `HH`, `LL`, `HL`, or `LH`; source punctuation or canonical `<sp0>`–`<sp3>` for silence |
 
 If MFA G2P returns multiple distinct pronunciations for one locked reading,
-all candidates are written under that occurrence alias. MFA selects the acoustic
-sequence; projection accepts only an exact candidate and records all variants
+only candidates that map completely and uniquely to the locked morae are
+written under that occurrence alias. MFA selects the acoustic sequence;
+projection accepts only an exact retained candidate and records the variants
 in the alias audit.
 
 The original and kana tiers are deliberately not split by token or phone. The
 words tier follows MFA word boundaries, synchronized to any refined phone
-silence edge, and uses source punctuation only where a real word gap exists. Untimed punctuation remains in original/kana and
+silence edge, and uses punctuation only where a real word gap exists. Unpunctuated internal sp1–sp3 gaps display `……` in all timed tiers and insert the same mark between the corresponding words in original/kana. A missing terminal mark is supplied as `。` only for a real trailing pause; the raw TXT remains unchanged. Untimed punctuation remains in original/kana and
 is listed in `postprocess.json.punctuation_unplaced`. The phone and its two
-auxiliary tiers follow the published, possibly refined, phone boundaries. Silence labels
-have the same canonical silence label in all three lower tiers; every
+auxiliary tiers follow the published, possibly refined, phone boundaries. Consecutive silence fragments are merged at publication. Pause labels and boundaries
+match words across all three lower tiers, including source punctuation; every
 non-silence phone must have both labels.
 All three lower tiers partition the entire file, including positive-duration
 canonical silence intervals and uncovered leading, internal, and trailing gaps.
 The first real leading silence owner is always `<sp1>`; legacy input
 silence-label configuration does not change this publication vocabulary.
-`alignment.json` stores that same partition plus the full per-phone mora trace.
+`alignment.json` stores that same merged publication partition plus the full per-phone mora trace.
+`postprocess.json` retains the separate acoustic intervals and their explicit/synthetic provenance. Its `publication_sp0_merges` records visual short-pause extensions and `publication_internal_ellipsis` records inserted internal marks with pause energy.
+Ongoing correction evidence belongs in [the alignment issue ledger](alignment-issues.md).
 
 `postprocess.json` stores raw/final phone intervals, integer-tick structural
 issues, 15 ms short-phone issues, energy boundary edits, refined-silence
@@ -57,6 +60,20 @@ QC failures produce diagnostics but no final TextGrid, processed WAV,
 `alignment.json`, `audio.json`, or completion marker. `audio.json` records
 source/working metadata and hashes; the published WAV is byte-identical to the
 MFA working input.
+
+Per-utterance `asr.json` stores source text, cleaned ASR result, aligned text,
+lexical timestamps, and punctuation gap/point or uncertain lexical-span
+timestamps. The directly runnable
+MFA corpus is under `mfa/corpus/`: same-stem working `.wav` and occurrence-alias
+`.lab`, with `mfa/dictionary.dict`. Native Qwen timestamps normally bound MFA
+crops under `mfa/segments/NNN/`, including a single-word utterance. Short
+isolated spans receive limited context; sustained speech-level sound touching
+another Qwen edge can add bounded context. The pipeline restores word and
+phone intervals to global working-WAV time. `mfa.json` records each group's
+crop, Qwen anchor, and acoustic support limit in global seconds;
+`postprocess.json.timestamp_alignment` records outer-edge differences. A
+difference above 0.2 seconds blocks publication unless that specific edge is
+supported by acoustic context and all quality checks pass. Punctuation stays out of `.lab`.
 
 Per-utterance JSON stores source text, ASR result, tokens, overrides, morae,
 tdmelodic output, G2P/alias data, MFA diagnostics, projections, and the final
@@ -85,3 +102,17 @@ comparison is marked `performed: false` with reason `no_authoritative_text`.
 
 Cached stages are reused only when their fingerprint and required files match.
 Delete/retry only project-owned utterance paths when recovering a corrupt stage.
+
+
+## Standalone ASR batch output
+
+`japanmfa asr-batch --input CORPUS --output NEW_DIRECTORY` always uses the
+ASR transcription, even when the input has a same-stem `.txt`. The output
+contains same-stem normalized `.wav` and ASR `.txt` pairs under one directory
+per utterance. These pairs can be passed to `japanmfa run`. The paired `.json`
+has full-sentence `kana`, `words` with Japanese surface/kana/start/end, and
+separate punctuation timestamps. Word readings are derived from the full ASR
+sentence with Sudachi and optional reading overrides; Qwen's Japanese text
+alignment does not use kana. Output word units can merge Qwen and Sudachi units
+when their boundaries cross. The root `manifest.jsonl` records transcribed,
+skipped, and failed items, and `summary.json` counts them.

@@ -18,6 +18,7 @@ def test_default_config_locks_required_models(tmp_path: Path) -> None:
 
     assert config.asr.language == "Japanese"
     assert config.asr.model == "Qwen/Qwen3-ASR-1.7B"
+    assert config.asr.aligner_model == "Qwen/Qwen3-ForcedAligner-0.6B"
     assert config.mfa.acoustic_model == "japanese_mfa"
     assert config.mfa.g2p_model == "japanese_mfa"
     assert config.audio.sample_rate == 16000
@@ -60,10 +61,10 @@ def test_config_rejects_invalid_mfa_dither(tmp_path: Path, value: float) -> None
         PipelineConfig.load(path)
 
 
-def test_config_defaults_mfa_dither_to_zero(tmp_path: Path) -> None:
+def test_config_defaults_mfa_dither_to_model_value(tmp_path: Path) -> None:
     path = tmp_path / "config.yaml"
     path.write_text("mfa: {}\n", encoding="utf-8")
-    assert PipelineConfig.load(path).mfa.dither == 0.0
+    assert PipelineConfig.load(path).mfa.dither == 1.0
 
 
 def test_audio_preprocess_defaults_are_upstream_values() -> None:
@@ -75,3 +76,9 @@ def test_audio_preprocess_defaults_are_upstream_values() -> None:
     assert config.audio.target_edge_silence_sec == .5
     assert config.audio.edge_silence_threshold == .001
     assert config.audio.edge_frame_length == 1024
+
+
+def test_config_accepts_custom_qwen_aligner_model(tmp_path: Path) -> None:
+    path = tmp_path / "config.yaml"
+    path.write_text("asr:\n  aligner_model: local/ja-aligner\n", encoding="utf-8")
+    assert PipelineConfig.load(path).asr.aligner_model == "local/ja-aligner"

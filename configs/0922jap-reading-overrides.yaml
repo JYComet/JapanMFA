@@ -1,0 +1,25 @@
+# 0922jap source-specific readings. Spans index the paired TXT.
+utterances:
+  01-00-a00-0050__0verflow_Shiny_Days:
+    readings:
+      - span: [0, 2]
+        surface: うぅ
+        kana: ウウ
+  01-00-a00-0070__0verflow_Shiny_Days:
+    readings:
+      - span: [9, 12]
+        surface: てるぅ
+        kana: テルウ
+      - span: [14, 16]
+        surface: あぅ
+        kana: アウ
+  01-00-a00-0100__0verflow_Shiny_Days:
+    readings:
+      - span: [0, 2]
+        surface: はぁ
+        kana: ハア
+  01-00-a00-0110__0verflow_Shiny_Days:
+    readings:
+      - span: [7, 9]
+        surface: 空い
+        kana: スイ

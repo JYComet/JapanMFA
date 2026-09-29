@@ -55,6 +55,7 @@ def _finite_nonnegative(value: Any, name: str, default: float) -> float:
 class ASRConfig:
     model: str = "Qwen/Qwen3-ASR-1.7B"
     fallback_model: str = "Qwen/Qwen3-ASR-0.6B"
+    aligner_model: str = "Qwen/Qwen3-ForcedAligner-0.6B"
     language: str = "Japanese"
 
 
@@ -62,7 +63,7 @@ class ASRConfig:
 class MFAConfig:
     acoustic_model: str = "japanese_mfa"
     g2p_model: str = "japanese_mfa"
-    dither: float = 0.0
+    dither: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -120,7 +121,7 @@ class PipelineConfig:
         _reject_unknown(values, sections, "top-level")
 
         asr_values = _as_mapping(values.get("asr"), "asr")
-        _reject_unknown(asr_values, {"model", "fallback_model", "language"}, "asr")
+        _reject_unknown(asr_values, {"model", "fallback_model", "aligner_model", "language"}, "asr")
         language = _string(asr_values.get("language"), "asr.language", "Japanese")
         if language != "Japanese":
             raise ValueError("asr.language must be Japanese")
@@ -131,6 +132,7 @@ class PipelineConfig:
                 "asr.fallback_model",
                 ASRConfig.fallback_model,
             ),
+            aligner_model=_string(asr_values.get("aligner_model"), "asr.aligner_model", ASRConfig.aligner_model),
             language=language,
         )
 

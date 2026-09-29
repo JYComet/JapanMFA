@@ -179,3 +179,26 @@ class MfaG2pClient:
             )
 
         return tuple(Pronunciation(reading, by_reading[reading][0], tuple(by_reading[reading][1:])) for reading in requested)
+
+
+class TerminalSokuonG2p:
+    """Restore a final small-tsu closure when MFA G2P drops it entirely.
+
+    Japanese MFA v3 emits /ʔ/ for other word-final ッ readings. The same
+    closure is needed to give the locked ッ mora an acoustic phone owner.
+    """
+
+    def __init__(self, delegate: MfaG2pClient) -> None:
+        self.delegate = delegate
+
+    def pronounce(self, readings: Sequence[str], work_dir: Path) -> tuple[Pronunciation, ...]:
+        pronunciations = self.delegate.pronounce(readings, work_dir)
+        restored: list[Pronunciation] = []
+        for reading, pronunciation in zip(readings, pronunciations):
+            candidates = (pronunciation.phones, *pronunciation.alternates)
+            if reading.endswith('ッ') and not any(candidate[-1:] == ('ʔ',) for candidate in candidates):
+                restored.append(Pronunciation(reading, (*pronunciation.phones, 'ʔ'),
+                                              candidates))
+            else:
+                restored.append(pronunciation)
+        return tuple(restored)

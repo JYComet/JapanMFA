@@ -34,6 +34,20 @@ def main() -> int:
         {"audio_path": path, "language": language, "text": "今日は晴れ" if i == 0 else "明日も晴れ"}
         for i, path in enumerate(result_paths)
     ]
+    if request.get("aligner_model"):
+        for row in results:
+            row.update({
+                "aligner_model": request["aligner_model"],
+                "alignment_text": "今日は、晴れ。",
+                "lexical_timestamps": [
+                    {"text": "今日は", "start": 0.1, "end": 0.5},
+                    {"text": "晴れ", "start": 0.7, "end": 1.0},
+                ],
+                "punctuation_timestamps": [
+                    {"text": "、", "start": 0.5, "end": 0.7, "source": "lexical_gap"},
+                    {"text": "。", "start": 1.0, "end": 1.0, "source": "boundary_point"},
+                ],
+            })
     print(json.dumps({"results": results}, ensure_ascii=False))
     return 0
 

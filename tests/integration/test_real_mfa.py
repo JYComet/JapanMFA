@@ -85,4 +85,8 @@ def test_real_mfa_g2p_and_alignment_emit_locked_alias_tiers(tmp_path: Path) -> N
 
     assert [word.alias for word in alignment.words] == ["jmfa_000000"]
     assert alignment.phones
-    assert all(phone.word_alias == "jmfa_000000" for phone in alignment.phones)
+    assert any(not phone.is_silence for phone in alignment.phones)
+    assert all(
+        phone.word_alias == "jmfa_000000" if not phone.is_silence else phone.word_alias is None
+        for phone in alignment.phones
+    )

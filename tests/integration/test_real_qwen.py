@@ -201,8 +201,16 @@ def test_real_qwen_reports_japanese_for_bounded_audio() -> None:
     if model_path.exists() and not model_path.is_dir():
         pytest.skip(f"JAPANMFA_REAL_QWEN_MODEL is not a model directory: {model_path}")
 
-    result = Qwen3ASRClient(_worker_command(), model=model).transcribe([audio])[audio]
+    aligner_model = os.environ.get("JAPANMFA_REAL_QWEN_ALIGNER_MODEL")
+    if not aligner_model:
+        pytest.skip("set JAPANMFA_REAL_QWEN_ALIGNER_MODEL to opt into Qwen timestamp verification")
+    result = Qwen3ASRClient(
+        _worker_command(), model=model, aligner_model=aligner_model
+    ).transcribe([audio])[audio]
 
     assert result.language == "Japanese"
     assert result.text.strip()
     assert any("ぁ" <= character <= "龯" for character in result.text)
+    assert result.lexical_timestamps
+    assert all(item.start <= item.end for item in result.lexical_timestamps)
+    assert all(item.source in {"lexical_gap", "boundary_point", "lexical_span"} for item in result.punctuation_timestamps)

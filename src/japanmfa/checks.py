@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Sequence
 
+from .asr.checkpoint import DEFAULT_ALIGNER_MODEL, local_native_aligner_dir as _local_native_aligner_dir, native_aligner_checkpoint_state
 from .accent.parser import parse_accent
 from .accent.tdmelodic import resolve_tdmelodic_command
 from .config import PipelineConfig
@@ -311,6 +312,33 @@ def _asr_model(config: PipelineConfig) -> PreflightCheck:
     return _check("qwen_model", False, "model_unavailable", "configured Qwen model was not found locally", "Download the configured Qwen3-ASR model into an isolated cache, then rerun check.")
 
 
+def _aligner_checkpoint_state(path: Path) -> str:
+    """Check the native qwen-asr checkpoint shape without loading weights."""
+    return native_aligner_checkpoint_state(path)
+
+
+def _qwen_aligner_model(config: PipelineConfig) -> PreflightCheck:
+    configured = os.environ.get("JAPANMFA_ALIGNER_MODEL_PATH")
+    if configured:
+        state = _aligner_checkpoint_state(Path(configured).expanduser())
+    else:
+        state = (
+            _aligner_checkpoint_state(_local_native_aligner_dir())
+            if config.asr.aligner_model == DEFAULT_ALIGNER_MODEL else "model_unavailable"
+        )
+        if state != "ok":
+            hf_home = Path(os.environ.get("HF_HOME", Path.home() / ".cache" / "huggingface"))
+            cache_name = "models--" + config.asr.aligner_model.replace("/", "--")
+            snapshots = hf_home / "hub" / cache_name / "snapshots"
+            states = [_aligner_checkpoint_state(path) for path in snapshots.iterdir()] if snapshots.is_dir() else []
+            state = "ok" if "ok" in states else ("model_incompatible" if "model_incompatible" in states else state)
+    if state == "ok":
+        return _check("qwen_aligner_model", True, "ok", "native Qwen ForcedAligner checkpoint is present")
+    if state == "model_incompatible":
+        return _check("qwen_aligner_model", False, state, "Qwen ForcedAligner checkpoint is not in the native qwen-asr format", "Use the native Qwen3-ForcedAligner-0.6B checkpoint, not a converted -hf checkpoint.")
+    return _check("qwen_aligner_model", False, state, "native Qwen ForcedAligner checkpoint is unavailable or incomplete", "Set JAPANMFA_ALIGNER_MODEL_PATH to a complete native Qwen3-ForcedAligner-0.6B directory or populate the Hugging Face cache.")
+
+
 def _qwen_cuda(config: PipelineConfig, timeout: float) -> PreflightCheck:
     cuda_required = os.environ.get("JAPANMFA_REQUIRE_CUDA", "0").casefold() in _TRUE_ENV_VALUES
     executable = _asr_executable(config)
@@ -416,6 +444,7 @@ def run_preflight(config: PipelineConfig) -> PreflightReport:
         _mfa_model(config, "g2p", timeout),
         _asr_runtime(config, _QWEN_TIMEOUT),
         _asr_model(config),
+        _qwen_aligner_model(config),
         _qwen_cuda(config, _QWEN_TIMEOUT),
         _tdmelodic_probe(timeout),
         _writable("output", config.paths.output_dir),

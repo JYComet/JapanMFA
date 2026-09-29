@@ -26,7 +26,7 @@ class MfaRunner:
         owned_root: Path,
         timeout: float | None = None,
         env: Mapping[str, str] | None = None,
-        dither: float = 0.0,
+        dither: float = 1.0,
     ) -> None:
         if isinstance(command, (str, bytes)) or not command or not all(
             isinstance(part, str) and part for part in command

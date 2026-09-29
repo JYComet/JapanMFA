@@ -246,3 +246,73 @@ def test_projection_accepts_only_model_candidate_selected_by_mfa() -> None:
     alignment = _alignment((("a", 0.0, 1.0, False),))
     annotations = project_annotations(alignment, lexicon, {0: _morae(("ア", "H"))}, PHONE_MAP)
     assert [item.interval.label for item in annotations] == ["a"]
+
+
+def test_projection_maps_observed_0060_long_jo_variant_without_splitting_phone() -> None:
+    # MFA selected this G2P alternative after timestamp cropping 大丈夫.
+    phones = ("ʑ", "oː", "ɯ")
+    lexicon = _lexicon("ジョウ", phones)
+    alignment = _alignment(tuple((phone, index * 0.1, (index + 1) * 0.1, False)
+                                 for index, phone in enumerate(phones)))
+
+    annotations = project_annotations(
+        alignment, lexicon, {0: _morae(("ジョ", "H"), ("ウ", "L"))}, PHONE_MAP
+    )
+
+    assert [item.kana_label for item in annotations] == ["ジョ", "ジョ|ウ", "ウ"]
+    assert [item.tone_label for item in annotations] == ["HH", "HL", "LL"]
+
+
+@pytest.mark.parametrize(
+    ("reading", "phones", "kana", "expected"),
+    [
+        ("ソウ", ("s", "o", "ɯ"), ("ソ", "ウ"), ("ソ", "ソ", "ウ")),
+        ("ソウ", ("s", "oː"), ("ソ", "ウ"), ("ソ", "ソ|ウ")),
+        ("ミタイ", ("mʲ", "i", "t", "a", "i"), ("ミ", "タ", "イ"), ("ミ", "ミ", "タ", "タ", "イ")),
+        ("カンキ", ("k", "a", "ɲ", "c", "i"), ("カ", "ン", "キ"), ("カ", "カ", "ン", "キ", "キ")),
+        ("ウワ", ("ɯ", "w", "a"), ("ウ", "ワ"), ("ウ", "ワ", "ワ")),
+        ("スゴイ", ("s", "ɨ", "ɡ", "o", "i"), ("ス", "ゴ", "イ"), ("ス", "ス", "ゴ", "ゴ", "イ")),
+        ("ネツ", ("n", "e", "ts", "ɨ"), ("ネ", "ツ"), ("ネ", "ネ", "ツ", "ツ")),
+    ],
+)
+def test_projection_maps_observed_0090_mfa_phones(
+    reading: str, phones: tuple[str, ...], kana: tuple[str, ...], expected: tuple[str, ...]
+) -> None:
+    lexicon = _lexicon(reading, phones)
+    alignment = _alignment(tuple((phone, index * 0.01, (index + 1) * 0.01, False)
+                                 for index, phone in enumerate(phones)))
+    morae = tuple((part, "H") for part in kana)
+
+    annotations = project_annotations(alignment, lexicon, {0: _morae(*morae)}, PHONE_MAP)
+
+    assert tuple(item.kana_label for item in annotations) == expected
+
+
+def test_unmappable_g2p_variant_is_removed_before_mfa_can_select_it() -> None:
+    from japanmfa.frontend.mora import segment_morae
+    from japanmfa.projection import filter_mappable_pronunciations
+
+    token = Token(0, 0, 2, "寒気", ("名詞",), "カンキ", "sudachi")
+    candidate = Pronunciation(
+        "カンキ", ("k", "a", "c", "i"), (("k", "a", "ɲ", "c", "i"),)
+    )
+
+    selected = filter_mappable_pronunciations(
+        (token,), (candidate,), {0: segment_morae(token)}, PHONE_MAP
+    )
+
+    assert selected == (Pronunciation("カンキ", ("k", "a", "ɲ", "c", "i")),)
+
+
+def test_projection_maps_observed_0100_long_ha_reading() -> None:
+    # The real Japanese MFA G2P returns h aː for the expanded ハア reading.
+    lexicon = _lexicon("ハア", ("h", "aː"))
+    alignment = _alignment((("h", 0.0, 0.1, False), ("aː", 0.1, 0.4, False)))
+
+    annotations = project_annotations(
+        alignment, lexicon, {0: _morae(("ハ", "H"), ("ア", "L"))}, PHONE_MAP
+    )
+
+    assert [(item.kana_label, item.tone_label) for item in annotations] == [
+        ("ハ", "HH"), ("ハ|ア", "HL")
+    ]

@@ -32,13 +32,23 @@ mfa model download acoustic japanese_mfa
 mfa model download g2p japanese_mfa
 ```
 
-The ASR model is local and is selected by `JAPANMFA_ASR_MODEL_PATH`, or by the
-standard Hugging Face cache under `HF_HOME`. The default is
-`Qwen/Qwen3-ASR-1.7B`; `Qwen/Qwen3-ASR-0.6B` may be configured as a fallback.
-When `JAPANMFA_ASR_MODEL_PATH` is set, the worker loads that existing directory
-instead of the request's Hugging Face model identifier; an invalid explicit path
-fails before model loading. No implicit model download happens during `check` or
-`run`.
+The ASR model is selected by `JAPANMFA_ASR_MODEL_PATH`, or by the standard
+Hugging Face cache under `HF_HOME`. The default is `Qwen/Qwen3-ASR-1.7B`.
+The Japanese timestamp stage requires the native
+`Qwen/Qwen3-ForcedAligner-0.6B` checkpoint. The worker first checks
+`.runtime/models/qwen3-forced-aligner-0.6b`, then the Hugging Face cache.
+`JAPANMFA_ALIGNER_MODEL_PATH` overrides both. The converted `-hf` checkpoint
+has a different config shape and is rejected by `japanmfa check`. An invalid
+explicit path fails before model loading. Install the pinned native revision
+with the ASR environment before running this checkout:
+
+```bash
+.runtime/envs/asr/bin/python -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id="Qwen/Qwen3-ForcedAligner-0.6B", revision="c7cbfc2048c462b0d63a45797104fc9db3ad62b7", local_dir=".runtime/models/qwen3-forced-aligner-0.6b")'
+```
+
+The official `model.safetensors` for that revision is 1,835,544,544 bytes
+with SHA-256 `47831d0e82f96b20e9034dba01a075ee06436654719f6a68289e49f1b65ce0e7`.
+No implicit model download happens during `check` or `run`.
 
 The worker and `japanmfa check` use the same device policy. With
 `JAPANMFA_REQUIRE_CUDA=1` (also `true` or `yes`), CUDA must be available and the
@@ -89,13 +99,14 @@ japanmfa check --config configs/default.yaml
 ```
 
 The report checks bounded command probes, MFA 3.x, Japanese MFA models, the
-Qwen runtime/model, tdmelodic `sy2a`, and temporary child-file writes under the
+Qwen runtime/ASR/ForcedAligner models, tdmelodic `sy2a`, and temporary child-file writes under the
 cache/output directories. Set `JAPANMFA_REQUIRE_CUDA=1` when CPU execution is
 explicitly disallowed. Set `JAPANMFA_TDMELODIC_COMMAND` to an isolated
-tdmelodic argv-like command and `JAPANMFA_ASR_MODEL_PATH` to a local model
-directory when those are not discoverable from the defaults.
+tdmelodic argv-like command and set `JAPANMFA_ASR_MODEL_PATH` and
+`JAPANMFA_ALIGNER_MODEL_PATH` when the models are not in the local cache.
 
 ```bash
+japanmfa asr-batch --input /path/to/corpus --output runs/asr-batch
 japanmfa run-file /path/to/001.ogg --text /path/to/001.txt --output runs/one
 japanmfa run --input /mnt/Raw/0922jap --output runs/0922jap-smoke --limit 3
 japanmfa run --input /mnt/Raw/0922jap --output runs/0922jap-full
@@ -104,29 +115,89 @@ japanmfa inspect runs/0922jap-full/manifest.jsonl
 
 An existing same-stem `.txt` is authoritative. Qwen3-ASR still runs in the
 validation path and its Japanese result is recorded, but it never silently
-rewrites that text. If `.txt` is absent, Japanese-only ASR text is a candidate
+rewrites that text. The ForcedAligner aligns the authoritative text when it
+exists. If `.txt` is absent, cleaned Japanese-only ASR text is a candidate
 and must pass the same frontend checks. Unsupported non-Japanese utterances are
 skipped with a reason code; one item failing does not stop the batch.
+By default, valid Qwen lexical spans set MFA audio crops at locked token
+boundaries. Long pauses at those boundaries separate crops; shorter or
+zero-width spans join neighbors within a continuous speech region. A sustained
+speech-level signal immediately outside a Qwen edge adds bounded acoustic
+context without crossing the neighboring gap midpoint. The original Qwen
+edges remain audit anchors. MFA determines phones inside each crop; timestamps that are
+missing, invalid, or inconsistent with the locked text fail that utterance.
+
+## ASR batch export
+
+`japanmfa asr-batch` needs only the audio, Qwen, ForcedAligner, and Japanese
+frontend runtimes. It ignores input sidecar `.txt` files because this mode
+exports the ASR transcription. For each `speaker/id.wav` or `.ogg`, a fresh,
+disjoint output directory contains:
+
+```text
+runs/asr-batch/speaker/id/id.wav   # trimmed and edge-silence-normalized PCM16/16 kHz
+runs/asr-batch/speaker/id/id.txt   # punctuated Japanese ASR text
+runs/asr-batch/speaker/id/id.json  # full kana, timed words with kana, punctuation timing
+```
+
+The batch root also contains `manifest.jsonl` and `summary.json`; a bad item
+is reported without discarding good items. The output WAV/TXT pairs are valid
+input to a later `japanmfa run --input runs/asr-batch --output runs/aligned`.
+The output root must be new or empty and disjoint from the source root.
+
+Qwen ForcedAligner times the audio against Japanese text, not kana. Qwen3-ASR
+does not return a separate kana field in this integration. Sudachi reads the
+whole ASR sentence to produce katakana; Qwen and Sudachi units are merged when
+their boundaries cross, so a kana reading is never split by guesswork. In each
+JSON file, `words` contains `text`, `kana`, `start`, and `end` in seconds on the
+output WAV. `punctuation` contains inferred gap spans or boundary points.
 
 ## Output
+
+`asr.json` records cleaned Japanese ASR text, the text supplied to Qwen3
+ForcedAligner, lexical timestamps, and punctuation timestamps. Markup and
+unspoken Unicode symbols are removed from ASR text while punctuation is
+retained. Qwen aligns spoken lexical units; punctuation spans are inferred
+from adjacent lexical gaps, or stored as zero-duration boundary points when
+there is no gap. A lexical gap of at least 0.4 seconds between locked tokens
+splits MFA into timestamp-bounded speech groups. Each crop normally uses its
+Qwen span; sustained speech-level energy touching an edge can extend the crop
+within a 0.6-second scan and the neighboring gap midpoint. MFA still
+determines phone boundaries; the pipeline does not stretch phones to fit Qwen.
+An outer word-edge difference above 0.2 seconds fails with
+`timestamp_mfa_disagreement` unless the recorded acoustic context covers that
+specific difference and all acoustic quality checks pass. Both supported and
+unresolved differences remain in `postprocess.json`. The project-owned
+`<utterance>/mfa/corpus/<utterance>.wav` and `.lab` plus
+`<utterance>/mfa/dictionary.dict` form the direct MFA input. The `.lab`
+contains occurrence aliases for locked Japanese readings, never punctuation.
+Timestamp-split groups have their own inputs and TextGrids in
+`<utterance>/mfa/segments/`; `mfa.json` records their global-time windows.
 
 Each aligned utterance contains a validated six-tier Praat TextGrid and JSON
 audit artifacts. The tiers are exactly:
 
-1. `original` — original source text with a leading `<sp1>`, one interval covering the complete audio;
-2. `kana` — complete locked katakana with a leading `<sp1>`, one interval covering the complete audio;
+1. `original` — source text with a leading `<sp1>` and publication-only `……` at unpunctuated internal sp1–sp3 gaps or `。` at a real unpunctuated trailing pause;
+2. `kana` — complete locked katakana with matching publication-only punctuation and a leading `<sp1>`;
 3. `words` — MFA word intervals updated at energy-refined silence edges, with source punctuation replacing real silent gaps;
-4. `phones` — MFA phone intervals with bounded energy refinement at explicit silence edges;
+4. `phones` — MFA phone intervals with bounded energy refinement at explicit silence edges and a missed synthetic leading onset;
 5. `phone_kana` — kana projected onto the exact published phone intervals;
 6. `phone_tone` — `HH / LL / HL / LH` projected from the contributing morae.
 
-The `words` tier follows the refined phone owner at any adjusted silence edge and places source punctuation on real pause spans. The last three tiers share the same published phone boundaries, including explicit silence.
+The `words` tier follows the refined phone owner at any adjusted silence edge and places punctuation on real pause spans. The last three tiers share the same published phone boundaries. Consecutive silence fragments are merged for publication; unpunctuated internal `<sp0>` gaps extend the preceding word and phone, while internal sp1–sp3 gaps display `……` in all four timed tiers and original/kana. Source punctuation remains its own pause owner. `postprocess.json` retains the premerge acoustic boundaries and energy evidence.
 Structural, short-phone, BGM, and word-energy checks are audited in `postprocess.json`; internal speech-to-speech MFA boundaries remain fixed.
 A long phone spanning H then L morae is labeled `HL`; no
 invented internal boundary is created. See [input/output](docs/input-output.md),
 [architecture](docs/architecture.md), and [accent mapping](docs/accent-mapping.md).
 
 The [September 24 upstream postprocess test report](docs/test-report-upstream-postprocess-20260924.md) records the baseline full runs. The [energy boundary follow-up](docs/test-report-energy-boundary-20260924.md) records the refined reruns and remaining failed intervals. The [historical regression applicability ledger](docs/upstream-regression-applicability-20260923.md) tracks the old project issues.
+
+The [September 28 timestamp-MFA test report](docs/test-report-timestamp-mfa-20260928.md)
+records the real-audio rerun with saved Qwen timestamps, per-item failures,
+and the live-model checkpoint limitation.
+The [acoustic-context correction report](docs/test-report-acoustic-context-0922jap-20260928.md)
+records the native Qwen rerun, the corrected 0110 tail, and the five samples
+that remain rejected.
 
 The [September 23 boundary repair report](docs/test-report-boundary-tone-20260923.md)
 includes the original failure, applicable ASRMFA--Pure postprocessing, and
@@ -177,3 +248,5 @@ silently retries by changing the source.
 The exact JSON reason code is the stable value to use in batch summaries and
 follow-up reports. A failed or skipped item never receives a partial final
 TextGrid.
+
+对齐问题与后续校对统一追加到 [问题记录文档](docs/alignment-issues.md)。发布前可运行 `tools/audit_textgrid_pauses.py` 检查连续停顿、跨轨标点和静音内声能；使用方法见该文档。

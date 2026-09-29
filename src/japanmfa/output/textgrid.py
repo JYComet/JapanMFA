@@ -7,11 +7,12 @@ import os
 import re
 import tempfile
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Sequence
 
 from japanmfa.domain import PhoneAnnotation, PhoneInterval, Token
+from japanmfa.frontend.japanese import _map_token_spans
 from japanmfa.mfa.textgrid import MfaWord
 
 
@@ -277,13 +278,29 @@ def validate_five_tier_textgrid(
             phone.end_raw,
         ) != (tone_interval.start_raw, tone_interval.end_raw):
             raise _error(f"phone-level boundaries differ at interval {index + 1}")
-        if not phone.label or phone.label in silence_labels:
+        if not phone.label or phone.label in silence_labels or _source_punctuation(phone.label):
             if kana_interval.label != phone.label or tone_interval.label != phone.label:
                 raise _error(f"silence labels are not canonical at interval {index + 1}")
         elif not phone.label or not kana_interval.label or not tone_interval.label:
             raise _error(f"non-silence labels are incomplete at interval {index + 1}")
         elif tone_interval.label not in {"HH", "LL", "HL", "LH"}:
             raise _error(f"non-silence tone must be HH, LL, HL or LH at interval {index + 1}")
+
+    def is_pause(label: str) -> bool:
+        return not label or label in silence_labels or bool(_source_punctuation(label))
+
+    for left, right in zip(phones.intervals, phones.intervals[1:]):
+        if is_pause(left.label) and is_pause(right.label):
+            raise _error("adjacent pause intervals must be coalesced")
+    if names == _EXPECTED_TIERS_WITH_WORDS:
+        word_pauses = {(row.start, row.end): row.label for row in words.intervals if is_pause(row.label)}
+        phone_pauses = {(row.start, row.end): row.label for row in phones.intervals if is_pause(row.label)}
+        for span, label in word_pauses.items():
+            if phone_pauses.get(span) != label:
+                raise _error("word/phone punctuation or pause boundaries differ")
+        for span, label in phone_pauses.items():
+            if _source_punctuation(label) and word_pauses.get(span) != label:
+                raise _error("phone punctuation has no matching word pause")
 
 
 def _float_text(value: float) -> str:
@@ -371,6 +388,164 @@ def _source_punctuation(value: str) -> str:
     return ""
 
 
+def publication_terminal_text(
+    original: str, kana: str, words: Sequence[tuple[float, float, str]],
+) -> tuple[str, str, str]:
+    """Give an unpunctuated source's real trailing pause a default sentence mark.
+
+    The source transcription stays unchanged upstream.  Only publication text is
+    supplemented, and only when the final word interval is an acoustic pause.
+    """
+    if not words or words[-1][2] not in _CANONICAL_SILENCE_LABELS:
+        return original, kana, ""
+    if not original.strip() or _source_punctuation(original.rstrip()[-1:]):
+        return original, kana, ""
+    mark = "。"
+    def append_before_trailing_whitespace(value: str) -> str:
+        head = value.rstrip()
+        return head + mark + value[len(head):]
+    return append_before_trailing_whitespace(original), append_before_trailing_whitespace(kana), mark
+
+
+def publication_phone_partition(
+    duration: float, annotations: Sequence[PhoneAnnotation],
+    *, words: Sequence[tuple[float, float, str]] | None = None,
+) -> tuple[PhoneAnnotation, ...]:
+    """Coalesce silence only for publication; keep acoustic provenance upstream."""
+    rows: list[PhoneAnnotation] = []
+    for item in complete_phone_partition(duration, annotations):
+        if item.is_silence and (item.kana_label or item.tone_label):
+            raise ValueError("silence annotations must not carry speech labels")
+        if item.is_silence and rows and rows[-1].is_silence:
+            prior = rows.pop()
+            item = replace(prior, interval=PhoneInterval(prior.interval.start, item.interval.end, ""))
+        rows.append(item)
+    punctuation = {(start, end): label for start, end, label in (words or ())
+                   if _source_punctuation(label)}
+    return tuple(
+        replace(item, interval=PhoneInterval(
+            item.interval.start, item.interval.end,
+            punctuation.get((item.interval.start, item.interval.end)) or _canonical_silence_label(
+                item.interval.end - item.interval.start, leading=item.interval.start == 0.,
+            ),
+        )) if item.is_silence else item
+        for item in rows
+    )
+
+
+def merge_internal_sp0_backward(
+    duration: float,
+    annotations: Sequence[PhoneAnnotation],
+    words: Sequence[tuple[float, float, str]],
+) -> tuple[tuple[PhoneAnnotation, ...], tuple[dict[str, object], ...]]:
+    """Give each unpunctuated internal ``<sp0>`` to the preceding owner.
+
+    Work from the fully coalesced publication partition, so fragmented MFA
+    silence cannot leave another adjacent pause behind.  Source punctuation
+    and leading/terminal silence remain their own owners.
+    """
+    partition = publication_phone_partition(duration, annotations, words=words)
+    word_by_span = {(start, end): index for index, (start, end, _) in enumerate(words)}
+    merged: list[PhoneAnnotation] = []
+    ledger: list[dict[str, object]] = []
+    for index, item in enumerate(partition):
+        span = (item.interval.start, item.interval.end)
+        word_index = word_by_span.get(span)
+        between_words = (
+            word_index is not None and 0 < word_index < len(words) - 1
+            and words[word_index - 1][1] == item.interval.start
+            and words[word_index + 1][0] == item.interval.end
+            and all(label not in _CANONICAL_SILENCE_LABELS
+                    and not _source_punctuation(label)
+                    for label in (words[word_index - 1][2], words[word_index + 1][2]))
+        )
+        inside_word = (
+            word_index is None and index + 1 < len(partition)
+            and merged and merged[-1].token_index == partition[index + 1].token_index
+            and any(start < item.interval.start < item.interval.end < end
+                    and label not in _CANONICAL_SILENCE_LABELS
+                    and not _source_punctuation(label)
+                    for start, end, label in words)
+        )
+        if (item.interval.label == "<sp0>" and (between_words or inside_word)
+                and 0 < index < len(partition) - 1
+                and merged and not merged[-1].is_silence
+                and not partition[index + 1].is_silence
+                and merged[-1].token_index is not None
+                and merged[-1].interval.end == item.interval.start
+                and partition[index + 1].interval.start == item.interval.end):
+            previous = merged.pop()
+            merged.append(replace(previous, interval=PhoneInterval(
+                previous.interval.start, item.interval.end, previous.interval.label,
+            )))
+            ledger.append({"start": item.interval.start, "end": item.interval.end,
+                           "previous_phone": previous.interval.label,
+                           "token_index": previous.token_index})
+        else:
+            merged.append(item)
+    return tuple(merged), tuple(ledger)
+
+
+def publication_internal_ellipsis(
+    original: str,
+    kana: str,
+    tokens: Sequence[Token],
+    words: Sequence[tuple[float, float, str]],
+) -> tuple[str, str, tuple[tuple[float, float, str], ...], tuple[dict[str, object], ...]]:
+    """Show unpunctuated sentence-internal sp1–sp3 as a shared ellipsis.
+
+    Add marks only to publication text.  The source token spans and raw MFA
+    geometry remain unchanged; interval labels are projected to phone tiers by
+    ``publication_phone_partition``.
+    """
+    lexical_rows = [index for index, (_, _, label) in enumerate(words)
+                    if label not in _CANONICAL_SILENCE_LABELS and not _source_punctuation(label)]
+    if len(lexical_rows) != len(tokens) or any(
+        words[row][2] != token.surface for row, token in zip(lexical_rows, tokens)
+    ):
+        raise ValueError("publication words differ from locked token order")
+    insert_after: dict[int, dict[str, object]] = {}
+    revised = list(words)
+    for ordinal, (left_row, right_row) in enumerate(zip(lexical_rows, lexical_rows[1:])):
+        if right_row != left_row + 2:
+            continue
+        gap_row = left_row + 1
+        start, end, label = words[gap_row]
+        if label not in {"<sp1>", "<sp2>", "<sp3>"}:
+            continue
+        revised[gap_row] = (start, end, "……")
+        insert_after[ordinal] = {
+            "start": start, "end": end,
+            "left_lexical_ordinal": ordinal,
+            "right_lexical_ordinal": ordinal + 1,
+            "prior_label": label, "mark": "……",
+        }
+    if not insert_after:
+        return original, kana, tuple(words), ()
+    mapped = _map_token_spans(original, tuple(tokens))
+    original_pieces: list[str] = []
+    kana_pieces: list[str] = []
+    plain_kana_pieces: list[str] = []
+    cursor = 0
+    for ordinal, (token, (start, end)) in enumerate(mapped):
+        gap = original[cursor:start]
+        original_pieces.extend((gap, original[start:end]))
+        kana_pieces.extend((gap, token.reading))
+        plain_kana_pieces.extend((gap, token.reading))
+        if ordinal in insert_after:
+            original_pieces.append("……")
+            kana_pieces.append("……")
+        cursor = end
+    suffix = original[cursor:]
+    original_pieces.append(suffix)
+    kana_pieces.append(suffix)
+    plain_kana_pieces.append(suffix)
+    if "".join(plain_kana_pieces) != kana:
+        raise ValueError("publication kana differs from locked token rendering")
+    return ("".join(original_pieces), "".join(kana_pieces), tuple(revised),
+            tuple(insert_after.values()))
+
+
 def build_word_intervals(
     duration: float,
     source: str,
@@ -442,7 +617,7 @@ def write_five_tier_textgrid(
     phone_rows: list[tuple[str, str, str, str, str]] = []
     silence_labels: set[str] = set()
     previous_end: float | None = None
-    for annotation in complete_phone_partition(duration, annotations):
+    for annotation in publication_phone_partition(duration, annotations, words=words):
         if not isinstance(annotation, PhoneAnnotation):
             raise TypeError("annotations must contain PhoneAnnotation values")
         interval = annotation.interval
@@ -453,10 +628,7 @@ def write_five_tier_textgrid(
             raise ValueError("annotation intervals overlap or are not monotonic")
         previous_end = interval.end
         if annotation.is_silence:
-            silence_label = _canonical_silence_label(
-                interval.end - interval.start,
-                leading=interval.start == 0.0,
-            )
+            silence_label = interval.label
             interval = PhoneInterval(interval.start, interval.end, silence_label)
             silence_labels.add(silence_label)
             if annotation.kana_label or annotation.tone_label:
@@ -506,4 +678,4 @@ def write_five_tier_textgrid(
                 pass
 
 
-__all__ = ["build_word_intervals", "complete_phone_partition", "validate_five_tier_textgrid", "write_five_tier_textgrid"]
+__all__ = ["build_word_intervals", "complete_phone_partition", "publication_phone_partition", "validate_five_tier_textgrid", "write_five_tier_textgrid"]

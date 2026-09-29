@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from japanmfa.errors import StageFailure
+from japanmfa.asr.timestamps import clean_asr_text
+
+
+@dataclass(frozen=True)
+class Timestamp:
+    text: str
+    start: float
+    end: float
+    source: str | None = None
 
 
 @dataclass(frozen=True)
@@ -19,20 +29,25 @@ class ASRResult:
     language: str
     text: str
     model: str
+    aligner_model: str | None = None
+    alignment_text: str | None = None
+    lexical_timestamps: tuple[Timestamp, ...] = ()
+    punctuation_timestamps: tuple[Timestamp, ...] = ()
 
 
 class Qwen3ASRClient:
     """Invoke Qwen3-ASR through its one-request/one-response subprocess API."""
 
-    def __init__(self, command: Sequence[str], model: str = "Qwen/Qwen3-ASR-1.7B") -> None:
+    def __init__(self, command: Sequence[str], model: str = "Qwen/Qwen3-ASR-1.7B", aligner_model: str = "Qwen/Qwen3-ForcedAligner-0.6B") -> None:
         if not command or not all(isinstance(part, str) and part for part in command):
             raise ValueError("command must be a non-empty argument array")
-        if not model:
-            raise ValueError("model must be a non-empty string")
+        if not model or not aligner_model:
+            raise ValueError("model and aligner_model must be non-empty strings")
         self._command = tuple(command)
         self._model = model
+        self._aligner_model = aligner_model
 
-    def transcribe(self, audio_paths: Sequence[Path]) -> dict[Path, ASRResult]:
+    def transcribe(self, audio_paths: Sequence[Path], *, reference_texts: Mapping[Path, str] | None = None) -> dict[Path, ASRResult]:
         """Transcribe absolute paths and validate the complete worker response."""
         requested = list(audio_paths)
         paths: list[Path] = []
@@ -60,8 +75,10 @@ class Qwen3ASRClient:
 
         request = {
             "model": self._model,
+            "aligner_model": self._aligner_model,
             "language": "Japanese",
             "audio_paths": [str(path) for path in paths],
+            "reference_texts": [None if reference_texts is None else reference_texts.get(path) for path in paths],
         }
         try:
             completed = subprocess.run(
@@ -173,11 +190,25 @@ class Qwen3ASRClient:
                     f"ASR worker returned duplicate result path: {audio_path}",
                     {"audio_path": audio_path},
                 )
+            if text != clean_asr_text(text):
+                raise StageFailure("asr", "invalid_response", "ASR text contains markup or special symbols", {"audio_path": audio_path})
+            aligner_model = raw_result.get("aligner_model")
+            alignment_text = raw_result.get("alignment_text")
+            if aligner_model != self._aligner_model or not isinstance(alignment_text, str) or not alignment_text:
+                raise StageFailure("asr", "invalid_response", "ASR worker omitted Japanese alignment evidence", {"audio_path": audio_path})
+            lexical = self._timestamps(raw_result.get("lexical_timestamps"), "lexical_timestamps", audio_path)
+            punctuation = self._timestamps(raw_result.get("punctuation_timestamps"), "punctuation_timestamps", audio_path)
+            if not lexical:
+                raise StageFailure("asr", "invalid_response", "ASR worker returned no lexical timestamps", {"audio_path": audio_path})
             converted[result_path] = ASRResult(
                 audio_path=result_path,
                 language=language,
                 text=text,
                 model=self._model,
+                aligner_model=aligner_model,
+                alignment_text=alignment_text,
+                lexical_timestamps=lexical,
+                punctuation_timestamps=punctuation,
             )
 
         requested_set = set(requested_paths)
@@ -193,3 +224,25 @@ class Qwen3ASRClient:
             )
 
         return {path: converted[path] for path in requested_paths}
+
+    @staticmethod
+    def _timestamps(raw: Any, name: str, audio_path: str) -> tuple[Timestamp, ...]:
+        if not isinstance(raw, list):
+            raise StageFailure("asr", "invalid_response", f"{name} must be an array", {"audio_path": audio_path})
+        parsed: list[Timestamp] = []
+        previous_start = 0.0
+        for item in raw:
+            if not isinstance(item, dict) or not isinstance(item.get("text"), str) or not item["text"]:
+                raise StageFailure("asr", "invalid_response", f"{name} item has invalid text", {"audio_path": audio_path})
+            start, end = item.get("start"), item.get("end")
+            if (isinstance(start, bool) or isinstance(end, bool)
+                    or not isinstance(start, (int, float)) or not isinstance(end, (int, float))
+                    or not math.isfinite(start) or not math.isfinite(end)
+                    or start < previous_start or end < start):
+                raise StageFailure("asr", "invalid_response", f"{name} item has invalid time", {"audio_path": audio_path})
+            source = item.get("source")
+            if source is not None and source not in {"lexical_gap", "boundary_point", "lexical_span"}:
+                raise StageFailure("asr", "invalid_response", f"{name} item has invalid source", {"audio_path": audio_path})
+            parsed.append(Timestamp(item["text"], float(start), float(end), source))
+            previous_start = float(start)
+        return tuple(parsed)
