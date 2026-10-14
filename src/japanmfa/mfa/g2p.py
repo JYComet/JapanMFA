@@ -54,9 +54,11 @@ class MfaG2pClient:
         ]
 
     def pronounce(
-        self, readings: Sequence[str], work_dir: Path
+        self, readings: Sequence[str], work_dir: Path, *, num_jobs: int | None = None
     ) -> tuple[Pronunciation, ...]:
         """Run G2P for *readings*, preserving duplicate input positions."""
+        if num_jobs is not None and num_jobs < 1:
+            raise ValueError("num_jobs must be positive")
         requested = tuple(readings)
         for index, reading in enumerate(requested):
             if not isinstance(reading, str) or not reading:
@@ -100,6 +102,8 @@ class MfaG2pClient:
             ) from exc
 
         command = self._build_command(input_path, output_path)
+        if num_jobs is not None:
+            command.extend(["--num_jobs", str(num_jobs)])
         try:
             completed = subprocess.run(
                 command,
@@ -191,8 +195,9 @@ class TerminalSokuonG2p:
     def __init__(self, delegate: MfaG2pClient) -> None:
         self.delegate = delegate
 
-    def pronounce(self, readings: Sequence[str], work_dir: Path) -> tuple[Pronunciation, ...]:
-        pronunciations = self.delegate.pronounce(readings, work_dir)
+    def pronounce(self, readings: Sequence[str], work_dir: Path, *, num_jobs: int | None = None) -> tuple[Pronunciation, ...]:
+        pronunciations = (self.delegate.pronounce(readings, work_dir) if num_jobs is None
+                          else self.delegate.pronounce(readings, work_dir, num_jobs=num_jobs))
         restored: list[Pronunciation] = []
         for reading, pronunciation in zip(readings, pronunciations):
             candidates = (pronunciation.phones, *pronunciation.alternates)

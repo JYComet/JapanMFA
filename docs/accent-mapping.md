@@ -28,11 +28,17 @@ For each MFA phone:
 - a rule with multiple morae and multiple phones of unequal cardinality must
   declare an explicit `mora_spans` list of half-open `[start, end]` ranges;
   the loader rejects such a rule when the ranges are absent or invalid;
-- silence has empty `phone_kana` and `phone_tone` labels;
+- silence carries no mora or tone in the internal annotation; at publication,
+  its pause or punctuation label is repeated on `phones`, `phone_kana`, and
+  `phone_tone` so the three timed tiers keep the same complete partition;
 - no internal boundary is fabricated inside a single MFA interval.
 
-`phone_tone` uses exactly `HH`, `LL`, `HL`, or `LH` on speech phones. These are
-pitch-state contours, not a statement that every phone has two morae. For
+`phone_tone` uses `HH`, `LL`, `HL`, or `LH` on speech phones with known mora tones.
+It uses `??` only when every contributing mora tone is unknown because the
+lexical-accent prediction was unusable while the locked reading still matched.
+A phone combining known and unknown mora tones fails rather than receiving a
+guessed contour. The four known labels are pitch-state contours, not a statement
+that every phone has two morae. For
 longer spans, HHH becomes HH, HHL becomes HL, and LHH becomes LH. More than one
 change (HLH or LHL) cannot be represented faithfully by these four labels and
 fails with `unsupported_tone_contour`. Complete ordered mora labels remain in

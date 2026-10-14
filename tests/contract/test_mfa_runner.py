@@ -67,6 +67,60 @@ def test_align_validates_first_and_uses_pinned_mfa_3_argv(tmp_path: Path, monkey
     assert (work / "align.stderr.log").read_text(encoding="utf-8") == ""
 
 
+def test_align_many_requires_exact_named_outputs(tmp_path: Path, monkeypatch) -> None:
+    corpus, dictionary, output, work, owned_root = _inputs(tmp_path)
+    (corpus / "002.lab").write_text("jmfa_000001\n", encoding="utf-8")
+    calls = []
+
+    def fake_run(self, command, _work, name):
+        calls.append(name)
+        if name == "align":
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "001.TextGrid").write_text("one")
+            (output / "002.TextGrid").write_text("two")
+
+    monkeypatch.setattr(MfaRunner, "_run", fake_run)
+    grids = _runner(owned_root).align_many(corpus, dictionary, output, work,
+                                            expected_stems={"001", "002"})
+    assert set(grids) == {"001", "002"}
+    assert calls == ["validate", "align"]
+
+
+def test_align_many_rejects_missing_grid(tmp_path: Path, monkeypatch) -> None:
+    corpus, dictionary, output, work, owned_root = _inputs(tmp_path)
+
+    def fake_run(self, command, _work, name):
+        if name == "align":
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "001.TextGrid").write_text("one")
+
+    monkeypatch.setattr(MfaRunner, "_run", fake_run)
+    with pytest.raises(StageFailure) as exc_info:
+        _runner(owned_root).align_many(corpus, dictionary, output, work,
+                                       expected_stems={"001", "002"})
+    assert exc_info.value.reason_code == "output_coverage_mismatch"
+
+
+def test_trusted_batch_uses_one_align_process_and_one_job(tmp_path: Path, monkeypatch) -> None:
+    corpus, dictionary, output, work, owned_root = _inputs(tmp_path)
+    commands = []
+
+    def fake_run(self, command, _work, name):
+        commands.append((name, command))
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "001.TextGrid").write_text("one")
+
+    monkeypatch.setattr(MfaRunner, "_run", fake_run)
+    grids = _runner(owned_root).align_many(
+        corpus, dictionary, output, work,
+        expected_stems={"001"}, external_validate=False, num_jobs=1,
+    )
+
+    assert set(grids) == {"001"}
+    assert [name for name, _ in commands] == ["align"]
+    assert commands[0][1][-2:] == ["--num_jobs", "1"]
+
+
 def test_nonzero_mfa_exit_preserves_stderr_and_skips_alignment(tmp_path: Path, monkeypatch) -> None:
     corpus, dictionary, output, work, owned_root = _inputs(tmp_path)
     argv_log = tmp_path / "argv.jsonl"
@@ -204,3 +258,35 @@ def test_align_rejects_work_output_overlap_before_mkdir(tmp_path: Path) -> None:
     )
     assert not output.exists()
     assert not work.exists()
+
+
+@pytest.mark.parametrize('actual', [set(), {'001'}])
+def test_trusted_batch_returns_partial_outputs_for_per_item_failures(
+        tmp_path: Path, monkeypatch, actual: set[str]) -> None:
+    corpus, dictionary, output, work, owned_root = _inputs(tmp_path)
+    (corpus / '002.lab').write_text('jmfa_000001\n')
+
+    def fake_run(self, command, _work, name):
+        if name == 'align':
+            for stem in actual:
+                (output / f'{stem}.TextGrid').write_text('grid')
+
+    monkeypatch.setattr(MfaRunner, '_run', fake_run)
+    result = _runner(owned_root).align_many(
+        corpus, dictionary, output, work, expected_stems={'001', '002'},
+        external_validate=False, allow_partial=True)
+    assert set(result) == actual
+
+
+def test_trusted_partial_batch_still_rejects_unexpected_output(tmp_path: Path, monkeypatch) -> None:
+    corpus, dictionary, output, work, owned_root = _inputs(tmp_path)
+
+    def fake_run(self, command, _work, name):
+        if name == 'align':
+            (output / 'foreign.TextGrid').write_text('grid')
+
+    monkeypatch.setattr(MfaRunner, '_run', fake_run)
+    with pytest.raises(StageFailure) as failure:
+        _runner(owned_root).align_many(corpus, dictionary, output, work,
+            expected_stems={'001'}, external_validate=False, allow_partial=True)
+    assert failure.value.reason_code == 'output_coverage_mismatch'

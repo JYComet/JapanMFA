@@ -182,13 +182,15 @@ audit artifacts. The tiers are exactly:
 3. `words` — MFA word intervals updated at energy-refined silence edges, with source punctuation replacing real silent gaps;
 4. `phones` — MFA phone intervals with bounded energy refinement at explicit silence edges and a missed synthetic leading onset;
 5. `phone_kana` — kana projected onto the exact published phone intervals;
-6. `phone_tone` — `HH / LL / HL / LH` projected from the contributing morae.
+6. `phone_tone` — `HH / LL / HL / LH` projected from known mora tones, or `??` when every contributing mora has unknown lexical accent.
 
 The `words` tier follows the refined phone owner at any adjusted silence edge and places punctuation on real pause spans. The last three tiers share the same published phone boundaries. Consecutive silence fragments are merged for publication; unpunctuated internal `<sp0>` gaps extend the preceding word and phone, while internal sp1–sp3 gaps display `……` in all four timed tiers and original/kana. Source punctuation remains its own pause owner. `postprocess.json` retains the premerge acoustic boundaries and energy evidence.
 Structural, short-phone, BGM, and word-energy checks are audited in `postprocess.json`; internal speech-to-speech MFA boundaries remain fixed.
 A long phone spanning H then L morae is labeled `HL`; no
 invented internal boundary is created. See [input/output](docs/input-output.md),
 [architecture](docs/architecture.md), and [accent mapping](docs/accent-mapping.md).
+For a complete Chinese-language introduction to the feature, see
+[Japanese accent, mora, and phone alignment](docs/japanese-accent-phone-alignment.md).
 
 The [September 24 upstream postprocess test report](docs/test-report-upstream-postprocess-20260924.md) records the baseline full runs. The [energy boundary follow-up](docs/test-report-energy-boundary-20260924.md) records the refined reruns and remaining failed intervals. The [historical regression applicability ledger](docs/upstream-regression-applicability-20260923.md) tracks the old project issues.
 

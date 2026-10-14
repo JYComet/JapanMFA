@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from praatio import textgrid
+from praatio.utilities import textgrid_io
 
 from japanmfa.asr.qwen3 import ASRResult, Timestamp
 from japanmfa.asr.timestamps import _lexical
@@ -39,8 +40,16 @@ def read_ctc_words(path: Path, reference: str, duration: float) -> tuple[Timesta
         raise ValueError(f'CTC TextGrid tier types are invalid: {path}')
     items = [Timestamp(row.label, row.start, row.end, 'precomputed_ctc')
              for row in words.entries if row.label]
-    items.extend(Timestamp(row.label, row.time, row.time, 'precomputed_ctc_zero_duration')
-                 for row in points.entries if row.label)
+    point_entries = points.entries
+    if any(a.time == b.time for a, b in zip(point_entries, point_entries[1:])):
+        # PointTier sorts equal-time labels; the file retains Qwen lexical order.
+        raw = textgrid_io.parseTextgridStr(path.read_text(encoding='utf-8-sig'),
+                                          includeEmptyIntervals=True)
+        point_entries = next(tier['entries'] for tier in raw['tiers']
+                             if tier['name'] == 'zero_duration')
+    items.extend(Timestamp(row.label, float(row.time), float(row.time),
+                           'precomputed_ctc_zero_duration')
+                 for row in point_entries if row.label)
     items.sort(key=lambda row: (row.start, row.end))
     previous_end = 0.0
     for row in items:
@@ -95,6 +104,18 @@ class PrecomputedCTCClient:
         self.reference_texts = dict(reference_texts)
         if set(self.grids) != set(self.reference_texts):
             raise ValueError('CTC grids and TXT references must have identical stems')
+
+    def cache_identity(self, stem: str) -> str:
+        from japanmfa.cache import stage_fingerprint
+        if stem not in self.grids:
+            raise StageFailure('asr', 'ctc_reference_mismatch', 'CTC source missing')
+        if _sha(Path(self.grids[stem])) != self.grid_sha256[stem]:
+            raise StageFailure('asr', 'invalid_precomputed_ctc', 'CTC grid changed after preflight')
+        return stage_fingerprint('precomputed-ctc-source-v1', {
+            'adapter': f'{type(self).__module__}.{type(self).__qualname__}',
+            'ctc_sha256': self.grid_sha256[stem], 'reference': self.reference_texts[stem],
+            'implementation': Path(__file__),
+        })
 
     def transcribe(self, audio_paths: Sequence[Path], *,
                    reference_texts: Mapping[Path, str] | None = None) -> dict[Path, ASRResult]:

@@ -1,0 +1,1436 @@
+{
+  "created_at_utc": "2026-10-03T08:46:38.033896+00:00",
+  "purpose": "Read-only evidence freeze for analysis/design handoff; no acoustic rerun, source/output/ledger/production-code or parameter changes.",
+  "git_head": "b1fdf2708044e6e5e5b3a290420679c186431fac",
+  "git_status_before_document": [
+    " M docs/alignment-issues.md",
+    " M docs/japgalgame-mfa-from-ctc-20260929.md",
+    " M src/japanmfa/asr/precomputed_ctc.py",
+    " M src/japanmfa/frontend/japanese.py",
+    " M src/japanmfa/mfa/data/japanese_mfa_v3_phone_map.yaml",
+    " M src/japanmfa/mfa/g2p.py",
+    " M src/japanmfa/mfa/runner.py",
+    " M src/japanmfa/mfa/timed.py",
+    " M src/japanmfa/mfa/timing_review.py",
+    " M src/japanmfa/pipeline.py",
+    " M src/japanmfa/postprocess.py",
+    " M tests/contract/test_mfa_runner.py",
+    " M tests/integration/test_pipeline_fake_backends.py",
+    " M tests/unit/test_mfa_timed.py",
+    " M tests/unit/test_postprocess.py",
+    " M tests/unit/test_precomputed_ctc_input.py",
+    " M tests/unit/test_projection.py",
+    " M tools/galgame_mfa_from_ctc.py",
+    "?? docs/hybrid-mfa-whole-first-20260930.md",
+    "?? docs/hybrid-mfa-whole-first-plan-20260930.md",
+    "?? docs/japgalgame-mfa-500k-capacity.md",
+    "?? docs/japgalgame-mfa-full-run.md",
+    "?? docs/mfa-fusion-singleload-plan-20260930.md",
+    "?? src/japanmfa/accent/resident.py",
+    "?? src/japanmfa/mfa/bulk_preparation.py",
+    "?? src/japanmfa/mfa/failed_retry.py",
+    "?? src/japanmfa/mfa/hybrid_batch.py",
+    "?? src/japanmfa/mfa/native_resident.py",
+    "?? src/japanmfa/mfa/preparation_cache.py",
+    "?? src/japanmfa/mfa/prepared_bundle.py",
+    "?? src/japanmfa/mfa/word_cache.py",
+    "?? src/japanmfa/mfa/word_fusion.py",
+    "?? tests/contract/test_bulk_native_options.py",
+    "?? tests/integration/test_bulk_preparation.py",
+    "?? tests/integration/test_parallel_preparation.py",
+    "?? tests/integration/test_preparation_handoff.py",
+    "?? tests/integration/test_word_preparation_cache.py",
+    "?? tests/unit/test_ctc_cache_identity.py",
+    "?? tests/unit/test_export_filtered_diagnostics.py",
+    "?? tests/unit/test_galgame_batch500_phone_map.py",
+    "?? tests/unit/test_galgame_hybrid.py",
+    "?? tests/unit/test_galgame_mapping_resumed1000.py",
+    "?? tests/unit/test_galgame_mapping_resumed2000.py",
+    "?? tests/unit/test_galgame_mapping_resumed3500.py",
+    "?? tests/unit/test_galgame_mapping_resumed4500.py",
+    "?? tests/unit/test_galgame_mapping_resumed5000.py",
+    "?? tests/unit/test_galgame_mapping_resumed5500.py",
+    "?? tests/unit/test_galgame_mfa_all.py",
+    "?? tests/unit/test_galgame_mfa_parallel.py",
+    "?? tests/unit/test_galgame_preparation_review.py",
+    "?? tests/unit/test_galgame_source_snapshot.py",
+    "?? tests/unit/test_galgame_timed_batch.py",
+    "?? tests/unit/test_galgame_whitespace_regression.py",
+    "?? tests/unit/test_mfa_failed_retry.py",
+    "?? tests/unit/test_mfa_hybrid_batch.py",
+    "?? tests/unit/test_mfa_word_fusion.py",
+    "?? tests/unit/test_native_resident.py",
+    "?? tests/unit/test_preparation_windows.py",
+    "?? tests/unit/test_prepared_bundle.py",
+    "?? tests/unit/test_resident_partial_accent.py",
+    "?? tools/export_filtered_diagnostics.py",
+    "?? tools/galgame_mfa_all.py",
+    "?? tools/galgame_mfa_hybrid.py",
+    "?? tools/galgame_mfa_parallel.py",
+    "?? tools/preparation_windows.py",
+    "?? tools/run_japgalgame_mfa_full.sh",
+    "?? tools/run_japgalgame_mfa_parallel.sh"
+  ],
+  "live_snapshot": {
+    "updated_at": 1791017197.2336063,
+    "pid": 2013962,
+    "phase": "after-ctc-complete",
+    "status": "running",
+    "mfa_pid": 2013963,
+    "mfa": {
+      "filtered": 205296,
+      "passed": 72766
+    },
+    "ctc_status": "complete_with_failures",
+    "ctc": {
+      "failed": 1640,
+      "missing_txt": 0,
+      "missing_wav": 0,
+      "paired": 6423108,
+      "remaining": 0,
+      "seen": 6423108,
+      "success": 6421468,
+      "workers_complete": 16
+    },
+    "ctc_issues": {},
+    "ctc_updated_at": 1790877470.6555634,
+    "last_scan": null,
+    "error": null,
+    "source": "/mnt/Raw/JapGalgame",
+    "output": "/mnt/Raw/GalgameMFA",
+    "batch_size": 500
+  },
+  "process_snapshot": {
+    "2013962": {
+      "start_ticks": "611661792",
+      "cmdline": "/home/user/JapanMFA/.runtime/envs/orchestrator/bin/python -u /home/user/JapanMFA/.runtime/jobs/galgame-mfa-all/supervise_run.py "
+    },
+    "2013963": {
+      "start_ticks": "611661801",
+      "cmdline": "/home/user/JapanMFA/.runtime/envs/orchestrator/bin/python -u /home/user/JapanMFA/tools/galgame_mfa_all.py --source /mnt/Raw/JapGalgame --output /mnt/Raw/GalgameMFA --state /home/user/JapanMFA/.runtime/jobs/galgame-mfa-all --config /home/user/JapanMFA/runs/0922jap-internal-ellipsis-20260929T084752Z/final-config.yaml --batch-size 500 "
+    },
+    "2013695": {
+      "start_ticks": "611661610",
+      "cmdline": "/home/user/JapanMFA/.runtime/envs/mfa/bin/python -u src/japanmfa/mfa/native_resident.py serve /home/user/JapanMFA/.runtime/jobs/galgame-mfa-all/native-resident.sock /home/user/JapanMFA/.runtime/jobs/galgame-mfa-all all "
+    },
+    "2013696": {
+      "start_ticks": "611661610",
+      "cmdline": "/home/user/JapanMFA/.runtime/envs/mfa/bin/python -u src/japanmfa/mfa/native_resident.py serve /home/user/JapanMFA/.runtime/jobs/galgame-mfa-all/preparation-resident.sock /home/user/JapanMFA/.runtime/jobs/galgame-mfa-all prepare "
+    },
+    "2014027": {
+      "start_ticks": "611661823",
+      "cmdline": "/home/user/JapanMFA/.runtime/envs/orchestrator/bin/python -u /home/user/JapanMFA/.runtime/jobs/galgame-mfa-all/preserve-work-evidence.py "
+    }
+  },
+  "resident_snapshots": {
+    "native-resident.sock.status.json": {
+      "code": 0,
+      "pid": 2013695,
+      "seconds": 23.232666407711804,
+      "model_loads": 2,
+      "model_hits": 658,
+      "g2p_loads": 0,
+      "g2p_hits": 0,
+      "operation": "align",
+      "at": 1791017186.7280521,
+      "started_at": 1791000817.7618454,
+      "accent_pid": null,
+      "model_sha256": [
+        "eee0d60657af89c468ec47be97a55bda4513e4d7201d44761d518b31f08a77c9",
+        "cb3ae2479220fc10ae636fd6075dd65e55454277cb3a356af86a6514c3fc5952"
+      ]
+    },
+    "preparation-resident.sock.status.json": {
+      "code": 0,
+      "pid": 2013696,
+      "seconds": 4.834863722324371,
+      "model_loads": 0,
+      "model_hits": 0,
+      "g2p_loads": 1,
+      "g2p_hits": 55,
+      "operation": "g2p",
+      "at": 1791017165.7339072,
+      "started_at": 1791000817.7707596,
+      "accent_pid": 2023416,
+      "model_sha256": []
+    }
+  },
+  "current_code_sha256": {
+    "tests/unit/test_galgame_mapping_resumed2000.py": "e84971476ce6052a69ea7325d5ece7ef0470b18ef3caf57daed66679d4c146ee",
+    "src/japanmfa/asr/precomputed_ctc.py": "9d952f3822e18ae6a1a689a0ef9b1494243b783c813fbbbb49c34b9f64fb54cf",
+    "src/japanmfa/output/textgrid.py": "b18d4fc054d078672d2a061ed0fa86095fddfa07c519a13975411b56ade63f9f",
+    "src/japanmfa/mfa/phone_map.py": "cf3c202b55d62f5cf4b8ab635478f4e3f5ffa5acaa41de63669c6da6836f428e",
+    "src/japanmfa/asr/checkpoint.py": "23af25ced1f6a0cc753fa4d073f79cf6843b430ff4d0e6c6e10a6fab81e6555f",
+    "src/japanmfa/config.py": "a2d7f61e3087b517822ff3de6329d8b2557a20e38c305b3b11b086698bea372c",
+    "src/japanmfa/accent/tdmelodic.py": "5ccbe4a159726139d0e6dd20083bf43a189bb7e0ab64b420a9f03990d06d9015",
+    "src/japanmfa/pipeline.py": "3f04ea34596ee419c1aa65f5aa23705f90edd7301ef70281f50484fa2e86ff58",
+    "tools/galgame_mfa_hybrid.py": "0927019861f30d7662797d039d5abd56780bcbf05e2ce7e0afc197b3e91cd002",
+    "src/japanmfa/checks.py": "9888338c849c4dd3de4ed4af3b67cf834f50f161d123751f22670bac44a7c240",
+    "src/japanmfa/mfa/bulk_preparation.py": "e33445ffee2fc90f95153b0121a45a078015ccbe6ddaf2c7c90808880379534f",
+    "src/japanmfa/mfa/lexicon.py": "d1b3099daebd08eb62ea86857e09ec24f2e3e976a5e76079fcc2980d891a926b",
+    "src/japanmfa/asr/word_kana.py": "76ab663771e6f57254edd3f96f5de63ef496876ba0d0a62f86a623aea31d0289",
+    "src/japanmfa/mfa/g2p.py": "341038594169a84122e81cddabc7e38d97589050ae1b3255269b528039e37a01",
+    "src/japanmfa/domain.py": "f1f43c4be48903a42191cbeb7afe876c504d87af68fb2f038b965f33c468978b",
+    "src/japanmfa/accent/__init__.py": "456a56844964a9c39d36cac1178e0d732ae97256feec87c480c437755abc8bf1",
+    "tests/unit/test_galgame_mapping_resumed5000.py": "c2f2a3a9d395e80c59dcc6d32e4723e4160e6a514a728a2dbc1b2b1ec0e114aa",
+    "runs/0922jap-internal-ellipsis-20260929T084752Z/final-config.yaml": "62fd273c81d8d6430a2af6d8243b08b6f6754dcb7c923bac10bf94ae27d36cad",
+    "tests/unit/test_galgame_source_snapshot.py": "fbd2f3d5a1bc791ecc390bc0a1aa03e4f38eb2553bdd000b8cc67a9a09af9fc5",
+    "tests/unit/test_galgame_batch500_phone_map.py": "da1ab64a30015c4cadfe5ef542ee5edf18c3e640873b05b586cfbdf5ac882eba",
+    "src/japanmfa/frontend/japanese.py": "a954cf830db5c2e368fc6752c61dd3d64fd79a0aeafcd0a6adccc6201ae68207",
+    "src/japanmfa/mfa/textgrid.py": "785cdc970e8abc02b6c215c2081becc07d94513a27785111ab3fdbb7efd3e061",
+    "src/japanmfa/asr/timestamps.py": "c96b243bef62220a8111c9d3a425e724003014a6a74144e65abc0dd157397cb2",
+    "src/japanmfa/cache.py": "569cc5eb7ba75c8fa1481b23b2c0547b1acdeacd73f78c034170806ac13a6ee4",
+    "tools/audit_textgrid_pauses.py": "9364fc88368b4b99e8fbb118998daa2e85b54c9cb90bd0535f622040d21ab778",
+    "src/japanmfa/frontend/overrides.py": "2e36355e6f0ed23f23728a92975540b3154e4237581a2d747a7c2225a1a56b30",
+    "tests/integration/test_bulk_preparation.py": "3896a698666cc7fbea3bd1de92b6ade60ff40d9c08f6f9201c4f1da21dc65210",
+    "src/japanmfa/errors.py": "e9a106b428e10305b1dadb5dad8fa1b1b809bd34386a6df7cdf3e67352f40dc3",
+    "src/japanmfa/mfa/recovery.py": "09b5fd1e3e000288ba8f83e733c8752a8a979ddf16a956c448e4328045c31219",
+    "src/japanmfa/output/__init__.py": "0857f5612884dc9acd645445a8616a21f30fdc617a134d25dc051801b014a758",
+    "src/japanmfa/asr/__init__.py": "191309197780b3cf9fc78f16e57be7c524eb0022884b43f347dc7e3d2fe1cb28",
+    "src/japanmfa/mfa/word_fusion.py": "426535a1e9c70c9164a900c1d903024af51022b1c8e425a9ca244e802a8df7df",
+    "src/japanmfa/frontend/__init__.py": "f2caca3f21b67de0c79bbf0e98872440671ca303e0b3a0e03d98446a79ae07df",
+    "src/japanmfa/mfa/timing_review.py": "a4ae36f1fad2688b40f9ad19cdcbc5bb40bb66cd51f1bff5ac3dbe0c0699d801",
+    "src/japanmfa/mfa/failed_retry.py": "df8f3f9185d5f8f163ca8b84e1856b95274b826ecb739b7f911ee5b118dc90b6",
+    "tests/contract/test_bulk_native_options.py": "83008812ef8307a19c47e28b3c3b4e3ff97fb934e0e77179965594b320fbdacb",
+    "src/japanmfa/asr/batch.py": "b2b5c20e361012ed52e7b44bb7a7c9c2a9dc3b1d984f71d22204de38454a24e9",
+    "src/japanmfa/mfa/hybrid_batch.py": "b69308ba5e6dc69111a50545969c6ffc7656180ab52c18f0e79fe8e0606dbe84",
+    "tests/unit/test_galgame_mapping_resumed3500.py": "d0f389d8a9f3b27bddf3fa97d3ef88e61bbbda286d29f96964e46a6c1f189652",
+    "src/japanmfa/accent/parser.py": "d9ff0407b2dea2992d25fc3a1c40fb0b02a21a0282e4514c5db5c31270b22350",
+    "src/japanmfa/output/reports.py": "3e784733b5c90aa24ea3c961e45d602118b555f5f468c4ff10ed08d6aa166873",
+    "src/japanmfa/audio.py": "b9b2c081da2a9b9c390707439fec6769390157e86e63c7172af8f8aec9651983",
+    "src/japanmfa/corpus.py": "b3ae8e92ab37e6731f4b521ec3cfe22acaf9429d3f1b78b3d0cb8588418b7bef",
+    "tests/unit/test_galgame_mapping_resumed4500.py": "6044d13afa7a7364891fe91e0ff5b449103c7b8e8fc9b06407871cc1f783cc43",
+    "tools/galgame_mfa_all.py": "4efe42e1e4feb9d6cb9f57a843339bb11f264ab69137581bcab1974176d6c7a6",
+    "src/japanmfa/mfa/data/japanese_mfa_v3_phone_map.yaml": "822b60eb0707677ffa8046264109bc0a3074a2018f8bb80270c48f6e48bc0362",
+    "src/japanmfa/projection.py": "f5603d90f7d2609ee076c868f650c3517a8009f341d24ac3f44a84a6fc4dc18c",
+    "src/japanmfa/asr/qwen3.py": "522fb76d08b5db02510b7aceab231a28040f28e48ae6a9cc4185d4bd78c061e7",
+    "tests/unit/test_galgame_mapping_resumed5500.py": "5716f0c77f5f60a5e741b179102a827cc3cdebfe6acd3b6934bf025da13d72a1",
+    "src/japanmfa/cli.py": "9f1a1feb62d583a08518c52621259943296dff6b5f33a2b96bca13a07d8c9632",
+    "src/japanmfa/postprocess.py": "721e5eafd2f8b0b4eb726e58681596db623119f7a66d9c2fd095266d684b6211",
+    "tools/galgame_mfa_from_ctc.py": "39d202b371df4466bfa649f575c35abf0787303564085e4bc200e6743935b235",
+    "src/japanmfa/mfa/timed.py": "9324e757d4c322d27452c22a4b00e6d1be998021e33f74d6c263a0d48a4da272",
+    "src/japanmfa/mfa/runner.py": "cca0235cd88aef5c405a7469c0a70ce2cb41a4e8a4a98f7336c0588018603df5",
+    "src/japanmfa/__init__.py": "e25e484a16e3e7092d3dcfccf6414534d0127338495123707092f79f547800bc",
+    "tests/unit/test_mfa_failed_retry.py": "34d8eb57a645400bc96c1281d9af39c5fb1853f12fb58a3e12e681c6a393b015",
+    "src/japanmfa/asr/worker.py": "199d699ef10b75ca2e9901f21c000b5bab82046d60aee68cdf747c99c0ea9be3",
+    "src/japanmfa/mfa/__init__.py": "b6114fb56dbc09eb4e66007f8d6eb1a65d236e39194eeb4b51bd8f2783f31a44",
+    "src/japanmfa/frontend/mora.py": "c61691ed058ea9fc16760ec5c3467918dbf45beb545dab733ff2d2c23220996a",
+    "src/japanmfa/mfa/native_resident.py": "b259ea9b72260802d6c1daeed75dd8f3b78b4f6364a430585e053a246e5f15f4",
+    "tests/unit/test_native_resident.py": "2cac4eff4c5c628f6ecef9c2202b69470afb5c17473c54414cb184d5ed4c6ba4",
+    "tests/unit/test_galgame_timed_batch.py": "b9dff58438e6733bfa7dbb82e031ae04ad3eb855d5f8078aeabc1cab6ffb4954",
+    ".runtime/jobs/galgame-mfa-all/supervise_run.py": "58e98c322ce7325a663843826e17e80709ea602d7668e6989160619400f46ccf",
+    ".runtime/jobs/galgame-mfa-all/preserve-work-evidence.py": "005139f644a5771e7e79b6d5d8347e84bc56ad5f1c328452aac971a911604eef",
+    ".runtime/jobs/galgame-mfa-all/resume-timed-resident.sh": "1700455454d815267fe4ac292f7d15ea12c3e825344dd7f3578a9fda9cd41ac9",
+    "src/japanmfa/mfa/preparation_cache.py": "4b699bfbbb79c743da8d2c09f371b9bc79e4caa16dfc08a2ce56ea29dbb695d8",
+    "src/japanmfa/mfa/prepared_bundle.py": "e712d983b14a337b6e6846ece3c1044afc6fa66410d49aa1916045a1243e2935",
+    "src/japanmfa/mfa/word_cache.py": "f788a366ab542e8f1b80517900405d80bd7abe792b8c509c07efcd8f957290b4",
+    "src/japanmfa/accent/resident.py": "179488168d03d37aeac5f0ef3db5ee4547e5dae6fe1c5451310d24f67cd68510",
+    "tools/preparation_windows.py": "22518eaf2c21850ff5797bd24f98db725247d347e339a0b4504f4a9ea1897a84",
+    "tests/unit/test_preparation_windows.py": "9dbb5bf397aab3f95057b1a9af2146a9759a55b39b1f7fd2be8b9ba7d6807013",
+    "tests/unit/test_ctc_cache_identity.py": "0a4b457d4b33dc5e9017f3447711fec312dca8379e15ee5b225dabbed61bd0e4",
+    "tests/unit/test_prepared_bundle.py": "5888389f84529bf903f2119ad8d11747ef3f5196cb6100da770f46a5e835e156",
+    "tests/unit/test_resident_partial_accent.py": "cfe030e1e4dccc528cee04c90b0dd25fd818a53f97ff954af7b7c172e3b71933",
+    "tests/integration/test_parallel_preparation.py": "9987fae3ccdac904a393c8291913914a1a8248c8bf088082ba6a2b9b57f0c3a3",
+    "tests/integration/test_preparation_handoff.py": "2b7fde71315de6aee6a0f1e5f1c9ccadcee457659b13a96455f89f8e1bd29a72",
+    "tests/integration/test_word_preparation_cache.py": "a1bbf33b8a767fdcab237fded20851094223c73bdd2a99f014a98ba6151c034d"
+  },
+  "compared_to_77_file_deployment": {
+    "count": 77,
+    "drift": {}
+  },
+  "evidence_sha256": {
+    "AGENTS.md": "e133868edd0d044254ff10e9ff66a864cd2d88867f003d1541d4682a8ab4b4a9",
+    ".runtime/jobs/galgame-mfa-all/startup-provenance.json": "7b0f3a3de32cc45d98526e553f063c388b4a60c60508b34d4ec294f7a89182fe",
+    ".runtime/jobs/galgame-mfa-all/listening-samples-e4c192e-20261003/samples.json": "c81d75aec53bbf3d39126507c5783114a6bb3d990ee1d26a510d8c815af94bdf",
+    ".runtime/jobs/galgame-mfa-all/listening-samples-e4c192e-20261003/sp-origin-analysis.json": "5de848fee76c6fae7ba24de0e004c0f89523a341f42757a3da000614b0368e75",
+    ".runtime/jobs/galgame-mfa-all/batch-evidence/e4c192e450754ac89d3b0c14baf89363/pass-rate-explanation-20261003.json": "a41eb4a9016cad128772ac4760d515530407f1138ebf88986613fd82b979772c",
+    ".runtime/jobs/galgame-mfa-all/batch-evidence/e4c192e450754ac89d3b0c14baf89363/run/hybrid-report.json": "f639f6105235a84446876b8511b66c138a074b9fd3f3af1fdcd8d749771d6c45",
+    ".runtime/jobs/galgame-mfa-all/batch-evidence/e4c192e450754ac89d3b0c14baf89363/run/batch-timed/0/aligned/b0189_000.TextGrid": "a18663005de1bbf6bee5f1d8d7a14aaa5dd3f98ae829a8bc528907e42f8c252d",
+    ".runtime/jobs/galgame-mfa-all/batch-evidence/e4c192e450754ac89d3b0c14baf89363/run/batch-timed/0/manifest.json": "1bbbb10faf188f01ce7cd70c0b97ea99fec4f9d664db68256a07d53d9c6ef4a6",
+    ".runtime/jobs/galgame-mfa-all/batch-evidence/e4c192e450754ac89d3b0c14baf89363/run/batch-timed/0/dictionary.dict": "304984cb141bf750d50d24c526de9aabf1863cb1759078e5cb60584dea4ca8f6"
+  },
+  "window_report_summary": {
+    "strategy": "ctc_timed_batch_resident",
+    "source_count": 2000,
+    "prepared_count": 1725,
+    "mfa_batches": {
+      "timed": {
+        "files": 5830,
+        "seconds": 93.32195823639631,
+        "jobs": 1,
+        "batches": 4
+      }
+    },
+    "published_or_retained": 344,
+    "newly_published": 344,
+    "phase_seconds": {
+      "preparation": 30.286370711401105,
+      "mfa_align": 93.32195823639631,
+      "timed_review": 111.43768205400556,
+      "publication": 13.166651831939816
+    },
+    "total_seconds": 248.2126659490168,
+    "run_dir": "/home/user/JapanMFA/.runtime/jobs/galgame-mfa-all/work/e4c192e450754ac89d3b0c14baf89363/run",
+    "destination": "/home/user/JapanMFA/.runtime/jobs/galgame-mfa-all/work/e4c192e450754ac89d3b0c14baf89363/candidate",
+    "preparation_handoff": {
+      "seconds": 30.286370711401105,
+      "prepared": 1725,
+      "failed": 275,
+      "sources": 2000
+    },
+    "elapsed_after_preparation_seconds": 217.9262952376157
+  },
+  "window_failure_diagnosis": {
+    "checked_at": 1791015158.2760253,
+    "batch": "e4c192e450754ac89d3b0c14baf89363",
+    "source_count": 2000,
+    "published": 344,
+    "terminal_reasons": {
+      "alignment_acoustic_coverage": 1259,
+      "no_mappable_pronunciation": 250,
+      "timestamp_mfa_disagreement": 112,
+      "unsupported_japanese_text": 15,
+      "bgm_suspect": 6,
+      "phone_in_silence": 3,
+      "malformed_output": 10,
+      "missing_output": 1
+    },
+    "local_postprocess_read": 1259,
+    "suspect_pause_items": 1257,
+    "short_edge_only_at_most_40ms_items": 73,
+    "pause_active_at_least_200ms_items": 904,
+    "unowned_region_items": 111,
+    "synthetic_silence_region_items": 513,
+    "overlapping_diagnostic_categories": true,
+    "previous_window_passed": 499,
+    "previous_window_mapping_rejections": 121,
+    "this_window_mapping_rejections": 250,
+    "limits": "Existing local reports only; no new acoustic run, NAS scan, code/threshold/model change or ledger credit. Counts locate automatic rejection mechanisms, not manual phonetic truth or definitive source-quality/root-cause attribution."
+  },
+  "samples": {
+    "batch": "e4c192e450754ac89d3b0c14baf89363",
+    "selection_seed": 20261003,
+    "selection": "7 long-energy / 3 short-edge; fixed-seed random within strata",
+    "items": [
+      {
+        "index": 1,
+        "stem": "u07dbf7189e01ecd170edd1d0",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_0821__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo2_0821__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "ええ、良さそうなお家だからこそ、私はじっとしていた方がいいと思うな。",
+        "duration": 6.8306875,
+        "group": "较长声能冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "e95d7ec78a8e6dc30ece6f780d7436d8e06bfeb4d86c08738210c404cc56d6da",
+          "txt": "2b3ffd4b0c030ba483415cfe0eb73de13d6019825baaee468f6188958739bd2f",
+          "ctc": "767cf4165c6135171324d6858d5d706ad3c5604a64db14fc8f453a3a30e9415b"
+        },
+        "copied_wav_sha256": "e95d7ec78a8e6dc30ece6f780d7436d8e06bfeb4d86c08738210c404cc56d6da",
+        "regions": [
+          {
+            "pause_start": 0.77,
+            "pause_end": 1.76,
+            "active_seconds": 0.56,
+            "longest_active_seconds": 0.56,
+            "active_start": 0.77,
+            "active_end": 1.33,
+            "play_start": 0.47000000000000003,
+            "play_end": 1.6300000000000001
+          },
+          {
+            "pause_start": 2.02,
+            "pause_end": 2.22,
+            "active_seconds": 0.14,
+            "longest_active_seconds": 0.12,
+            "active_start": 2.1,
+            "active_end": 2.22,
+            "play_start": 1.8,
+            "play_end": 2.52
+          }
+        ]
+      },
+      {
+        "index": 2,
+        "stem": "uabaf9ac814eeff92c79fb519",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo1_1999__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo1_1999__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "そんな簡単に諦められないもの。なんだって相手が日寄りだし、しょうもない理由で大喧嘩とかするかもしれないじゃん。",
+        "duration": 9.553375,
+        "group": "较长声能冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "e4a9307f848261997f6defebcb36e9ac2a740c04f1867d67b2a65ed33b47f638",
+          "txt": "8b68c03edcb94dca78a9424a18bbd8e8003ea960a38253757d776b80fd8e4770",
+          "ctc": "48cc8345d12c0a0c423a161950a790a4b1590d83bc8d2f4ace7d6882885f6724"
+        },
+        "copied_wav_sha256": "e4a9307f848261997f6defebcb36e9ac2a740c04f1867d67b2a65ed33b47f638",
+        "regions": [
+          {
+            "pause_start": 1.97,
+            "pause_end": 2.34,
+            "active_seconds": 0.37,
+            "longest_active_seconds": 0.37,
+            "active_start": 1.97,
+            "active_end": 2.34,
+            "play_start": 1.67,
+            "play_end": 2.6399999999999997
+          },
+          {
+            "pause_start": 6.57,
+            "pause_end": 6.79,
+            "active_seconds": 0.22,
+            "longest_active_seconds": 0.22,
+            "active_start": 6.57,
+            "active_end": 6.79,
+            "play_start": 6.2700000000000005,
+            "play_end": 7.09
+          },
+          {
+            "pause_start": 0.79,
+            "pause_end": 0.97,
+            "active_seconds": 0.16,
+            "longest_active_seconds": 0.16,
+            "active_start": 0.79,
+            "active_end": 0.95,
+            "play_start": 0.49000000000000005,
+            "play_end": 1.25
+          }
+        ]
+      },
+      {
+        "index": 3,
+        "stem": "u01ebfba0a38bcd38199798bc",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_0390__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo2_0390__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "ええ無理。",
+        "duration": 2.8906875,
+        "group": "较长声能冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "578fa275bb14b4e246265100aeea1e28a4e19996644dd158c1e1c4d03946011b",
+          "txt": "c8ed3cbd11e8c90b6c2942a1b71b30684cb7150ba292f9c2ce8487657036d64b",
+          "ctc": "a33fb9fed5a7eff42d1af51fa87d02d9db0edd35cb36d3c0f6d9a4b973663b57"
+        },
+        "copied_wav_sha256": "578fa275bb14b4e246265100aeea1e28a4e19996644dd158c1e1c4d03946011b",
+        "regions": [
+          {
+            "pause_start": 1.25,
+            "pause_end": 1.6,
+            "active_seconds": 0.22,
+            "longest_active_seconds": 0.22,
+            "active_start": 1.25,
+            "active_end": 1.47,
+            "play_start": 0.95,
+            "play_end": 1.77
+          }
+        ]
+      },
+      {
+        "index": 4,
+        "stem": "u5f63ebb03626529f122c5775",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo1_1846__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo1_1846__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "タクマ。",
+        "duration": 2.969375,
+        "group": "较长声能冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "ce921c1e820172813ede1976ffcd81bb36dc7e2146162be364c0fa1e731320a6",
+          "txt": "b5f2bf889936526c147f4ee5fe055a13ab7afd2905952bfd00192657acb4e59f",
+          "ctc": "242387fdba83202e95c71dd0fb84a5cad9b19d09d4e3bb44231726931cd7af0a"
+        },
+        "copied_wav_sha256": "ce921c1e820172813ede1976ffcd81bb36dc7e2146162be364c0fa1e731320a6",
+        "regions": [
+          {
+            "pause_start": 0.88,
+            "pause_end": 2.969375,
+            "active_seconds": 1.32,
+            "longest_active_seconds": 1.24,
+            "active_start": 0.98,
+            "active_end": 2.22,
+            "play_start": 0.6799999999999999,
+            "play_end": 2.52
+          }
+        ]
+      },
+      {
+        "index": 5,
+        "stem": "u25f8c308c29f3d549bed7968",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_1563__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo2_1563__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "私のプニプニでアンザン型なポリケツが。",
+        "duration": 5.129375,
+        "group": "较长声能冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "1383b6f41c4eeed93b6d089de31101c6828c3fbfe3989ba63fdd1f8b18463529",
+          "txt": "514472136522e37a7978ce90e25a8ce71fe737e0da7ebb78ad149fcb7f9ab5cd",
+          "ctc": "d3a51cd88a608f90ca6c20819eaa1bca0ce02b29587dc18c03ee9b4ff196304f"
+        },
+        "copied_wav_sha256": "1383b6f41c4eeed93b6d089de31101c6828c3fbfe3989ba63fdd1f8b18463529",
+        "regions": [
+          {
+            "pause_start": 3.55,
+            "pause_end": 5.129375,
+            "active_seconds": 0.96,
+            "longest_active_seconds": 0.85,
+            "active_start": 3.75,
+            "active_end": 4.6,
+            "play_start": 3.45,
+            "play_end": 4.8999999999999995
+          },
+          {
+            "pause_start": 0.0,
+            "pause_end": 1.35,
+            "active_seconds": 0.77,
+            "longest_active_seconds": 0.65,
+            "active_start": 0.53,
+            "active_end": 1.18,
+            "play_start": 0.23000000000000004,
+            "play_end": 1.48
+          },
+          {
+            "pause_start": 2.57,
+            "pause_end": 3.15,
+            "active_seconds": 0.39,
+            "longest_active_seconds": 0.14,
+            "active_start": 2.59,
+            "active_end": 2.73,
+            "play_start": 2.29,
+            "play_end": 3.03
+          }
+        ]
+      },
+      {
+        "index": 6,
+        "stem": "uf2185d00e25d0cf201965803",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_1301__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo2_1301__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "ちょっとあんたたち。",
+        "duration": 2.8106875,
+        "group": "较长声能冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "5a7036359303339c07ab1f35da68d1c24b0dad5c2fa80f15d16de89420263f24",
+          "txt": "fff76f5f5ccd6b8b00bc3b4bed363d7f7458746f61eee756d446557eb2bd24bd",
+          "ctc": "452000d06bd7f782ccdd7f8a356fb69cd1912560b78cd7d9fe2f3ce3b472962d"
+        },
+        "copied_wav_sha256": "5a7036359303339c07ab1f35da68d1c24b0dad5c2fa80f15d16de89420263f24",
+        "regions": [
+          {
+            "pause_start": 0.0,
+            "pause_end": 1.05,
+            "active_seconds": 0.25,
+            "longest_active_seconds": 0.25,
+            "active_start": 0.58,
+            "active_end": 0.83,
+            "play_start": 0.27999999999999997,
+            "play_end": 1.13
+          }
+        ]
+      },
+      {
+        "index": 7,
+        "stem": "u8f7edc7d107f9848360bff85",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo1_2037__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo1_2037__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "あ、私も日寄りと喧嘩したり日寄りに飽きたらとんと恋だから。",
+        "duration": 5.672,
+        "group": "较长声能冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "73480b516b6cb4e014f8f4e99c85900c8ad5b4faf7a46831f1a2d795de764cdc",
+          "txt": "83a26602b242c8fc0970372d914fb2970fdf57c93fb38fe30d03b6becbc29493",
+          "ctc": "d408602f9955599bb1b1a73f87896a57467de546d813d210a9c8f6afa8789cb2"
+        },
+        "copied_wav_sha256": "73480b516b6cb4e014f8f4e99c85900c8ad5b4faf7a46831f1a2d795de764cdc",
+        "regions": [
+          {
+            "pause_start": 1.01,
+            "pause_end": 1.67,
+            "active_seconds": 0.52,
+            "longest_active_seconds": 0.43,
+            "active_start": 1.05,
+            "active_end": 1.48,
+            "play_start": 0.75,
+            "play_end": 1.78
+          },
+          {
+            "pause_start": 4.14,
+            "pause_end": 4.7,
+            "active_seconds": 0.39,
+            "longest_active_seconds": 0.17,
+            "active_start": 4.53,
+            "active_end": 4.7,
+            "play_start": 4.23,
+            "play_end": 5.0
+          }
+        ]
+      },
+      {
+        "index": 8,
+        "stem": "u766bdffe7b6dab9c43bfab96",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo1_1995__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo1_1995__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "ね、なんか下でタクマとアイヤちゃんが言い合ってるんだけど。",
+        "duration": 5.101375,
+        "group": "短停顿边缘冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "fd7f8b59c4f5c6a988ede1c42ff30864dec3af81faa511eb648050c2c3e6c01f",
+          "txt": "0482c69b68d45a2fae0b092dd6f1c530ca229aefd5a8cdff2abe1e2db1cf2c77",
+          "ctc": "e85724427e57420e2d76c7c93d949954091aa2a0db5b15e0f6b500be43522129"
+        },
+        "copied_wav_sha256": "fd7f8b59c4f5c6a988ede1c42ff30864dec3af81faa511eb648050c2c3e6c01f",
+        "regions": [
+          {
+            "pause_start": 1.52,
+            "pause_end": 1.56,
+            "active_seconds": 0.03,
+            "longest_active_seconds": 0.03,
+            "active_start": 1.52,
+            "active_end": 1.55,
+            "play_start": 1.22,
+            "play_end": 1.85
+          }
+        ]
+      },
+      {
+        "index": 9,
+        "stem": "udc0ca29b89456c501c3869ed",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_0986__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo2_0986__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "タックニコニコしてるけど、絶対私のことバカにしてる目で見てる。",
+        "duration": 6.909375,
+        "group": "短停顿边缘冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "f27fe4346fa90ff72cad40a04bba1b60835261df8c7b2bc55317d84f3952ea9f",
+          "txt": "e88934a841fb9aec5979fccc1a293e7df5845faa4a57bc464eb2a94052020c6a",
+          "ctc": "5483765f32f0c7e4c366f1e5d4667cd23ab6c1393772ba6bdc3ee5af83be2d13"
+        },
+        "copied_wav_sha256": "f27fe4346fa90ff72cad40a04bba1b60835261df8c7b2bc55317d84f3952ea9f",
+        "regions": [
+          {
+            "pause_start": 4.32,
+            "pause_end": 4.4,
+            "active_seconds": 0.03,
+            "longest_active_seconds": 0.03,
+            "active_start": 4.32,
+            "active_end": 4.35,
+            "play_start": 4.0200000000000005,
+            "play_end": 4.6499999999999995
+          }
+        ]
+      },
+      {
+        "index": 10,
+        "stem": "u3e4114e626ddc5d51abae8b9",
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_1514__ASa_Project_Karigurashi_Ren_ai",
+        "source_wav": "/mnt/Raw/JapGalgame/ASa_Project_Karigurashi_Ren_ai/wav/vo2_1514__ASa_Project_Karigurashi_Ren_ai.wav",
+        "text": "タック君が死んだら私も死ぬ。それが判例としての覚悟。",
+        "duration": 5.432,
+        "group": "短停顿边缘冲突",
+        "reason": "alignment_acoustic_coverage",
+        "source_sha256": {
+          "wav": "8d3e4141259c3886c44e1c471584ea7b3d811908093538e1e024f24db6533390",
+          "txt": "19b525fa79607b5850c32bedb78689fa10fed8d1905ffe4aea164f9465ece7d8",
+          "ctc": "98b59eb80e4ed546b9ecbb81a07d7df6f86369c5fa317cf02b69444ce5cf2f11"
+        },
+        "copied_wav_sha256": "8d3e4141259c3886c44e1c471584ea7b3d811908093538e1e024f24db6533390",
+        "regions": [
+          {
+            "pause_start": 4.0,
+            "pause_end": 4.08,
+            "active_seconds": 0.03,
+            "longest_active_seconds": 0.03,
+            "active_start": 4.0,
+            "active_end": 4.03,
+            "play_start": 3.7,
+            "play_end": 4.33
+          }
+        ]
+      }
+    ],
+    "created_at": 1791015516.8571901,
+    "limits": "10 selected examples only; no production decision/code/source changes"
+  },
+  "sp_origin": {
+    "checked_at": 1791016349.69062,
+    "batch": "e4c192e450754ac89d3b0c14baf89363",
+    "items": [
+      {
+        "index": 1,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_0821__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "u07dbf7189e01ecd170edd1d0",
+        "primary_conflict": [
+          0.77,
+          1.76
+        ],
+        "native_explicit_silence": [
+          [
+            0.77,
+            1.16
+          ],
+          [
+            1.68,
+            1.76
+          ]
+        ],
+        "filled_uncovered_gap": [
+          [
+            1.16,
+            1.68
+          ]
+        ],
+        "classification": "mixed",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": 1.16,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000000"
+            ],
+            "anchor_end": 0.56,
+            "anchor_start": 0.48,
+            "end": 1.16,
+            "start": 0.0
+          },
+          {
+            "acoustic_end_limit": 2.56,
+            "acoustic_start_limit": 1.78,
+            "aliases": [
+              "jmfa_000001",
+              "jmfa_000002",
+              "jmfa_000003",
+              "jmfa_000004"
+            ],
+            "anchor_end": 2.56,
+            "anchor_start": 1.92,
+            "end": 2.56,
+            "start": 1.68
+          },
+          {
+            "acoustic_end_limit": 3.56,
+            "acoustic_start_limit": 2.1,
+            "aliases": [
+              "jmfa_000005",
+              "jmfa_000006",
+              "jmfa_000007",
+              "jmfa_000008"
+            ],
+            "anchor_end": 3.36,
+            "anchor_start": 2.56,
+            "end": 3.6,
+            "start": 2.56
+          },
+          {
+            "acoustic_end_limit": 4.64,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000009",
+              "jmfa_000010",
+              "jmfa_000011"
+            ],
+            "anchor_end": 4.64,
+            "anchor_start": 3.84,
+            "end": 4.64,
+            "start": 3.84
+          },
+          {
+            "acoustic_end_limit": 5.28,
+            "acoustic_start_limit": 4.57,
+            "aliases": [
+              "jmfa_000012",
+              "jmfa_000013",
+              "jmfa_000014",
+              "jmfa_000015",
+              "jmfa_000016"
+            ],
+            "anchor_end": 5.28,
+            "anchor_start": 4.64,
+            "end": 5.28,
+            "start": 4.64
+          },
+          {
+            "acoustic_end_limit": 6.33,
+            "acoustic_start_limit": 5.11,
+            "aliases": [
+              "jmfa_000017",
+              "jmfa_000018",
+              "jmfa_000019",
+              "jmfa_000020",
+              "jmfa_000021"
+            ],
+            "anchor_end": 6.32,
+            "anchor_start": 5.28,
+            "end": 6.45,
+            "start": 5.28
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      },
+      {
+        "index": 2,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo1_1999__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "uabaf9ac814eeff92c79fb519",
+        "primary_conflict": [
+          1.97,
+          2.34
+        ],
+        "native_explicit_silence": [
+          [
+            1.97,
+            2.16
+          ],
+          [
+            2.16,
+            2.34
+          ]
+        ],
+        "filled_uncovered_gap": [],
+        "classification": "native_mfa",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": 2.16,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000000",
+              "jmfa_000001",
+              "jmfa_000002",
+              "jmfa_000003"
+            ],
+            "anchor_end": 1.92,
+            "anchor_start": 0.48,
+            "end": 2.16,
+            "start": 0.48
+          },
+          {
+            "acoustic_end_limit": 3.17,
+            "acoustic_start_limit": 1.8,
+            "aliases": [
+              "jmfa_000004",
+              "jmfa_000005",
+              "jmfa_000006"
+            ],
+            "anchor_end": 2.88,
+            "anchor_start": 2.4,
+            "end": 3.2,
+            "start": 2.16
+          },
+          {
+            "acoustic_end_limit": 4.4,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000007",
+              "jmfa_000008",
+              "jmfa_000009",
+              "jmfa_000010"
+            ],
+            "anchor_end": 4.4,
+            "anchor_start": 3.52,
+            "end": 4.4,
+            "start": 3.52
+          },
+          {
+            "acoustic_end_limit": 5.64,
+            "acoustic_start_limit": 4.34,
+            "aliases": [
+              "jmfa_000011",
+              "jmfa_000012",
+              "jmfa_000013",
+              "jmfa_000014",
+              "jmfa_000015"
+            ],
+            "anchor_end": 5.6,
+            "anchor_start": 4.4,
+            "end": 5.76,
+            "start": 4.4
+          },
+          {
+            "acoustic_end_limit": 6.88,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000016",
+              "jmfa_000017",
+              "jmfa_000018"
+            ],
+            "anchor_end": 6.88,
+            "anchor_start": 6.24,
+            "end": 6.88,
+            "start": 6.24
+          },
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": 6.47,
+            "aliases": [
+              "jmfa_000019",
+              "jmfa_000020",
+              "jmfa_000021"
+            ],
+            "anchor_end": 7.68,
+            "anchor_start": 6.88,
+            "end": 7.68,
+            "start": 6.88
+          },
+          {
+            "acoustic_end_limit": 9.03,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000022",
+              "jmfa_000023",
+              "jmfa_000024",
+              "jmfa_000025",
+              "jmfa_000026",
+              "jmfa_000027",
+              "jmfa_000028",
+              "jmfa_000029"
+            ],
+            "anchor_end": 8.8,
+            "anchor_start": 7.68,
+            "end": 9.15,
+            "start": 7.68
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      },
+      {
+        "index": 3,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_0390__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "u01ebfba0a38bcd38199798bc",
+        "primary_conflict": [
+          1.25,
+          1.6
+        ],
+        "native_explicit_silence": [
+          [
+            1.25,
+            1.52
+          ]
+        ],
+        "filled_uncovered_gap": [
+          [
+            1.52,
+            1.6
+          ]
+        ],
+        "classification": "mixed",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000000"
+            ],
+            "anchor_end": 1.52,
+            "anchor_start": 0.48,
+            "end": 1.52,
+            "start": 0.48
+          },
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000001"
+            ],
+            "anchor_end": 2.4,
+            "anchor_start": 1.6,
+            "end": 2.4,
+            "start": 1.6
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      },
+      {
+        "index": 4,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo1_1846__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "u5f63ebb03626529f122c5775",
+        "primary_conflict": [
+          0.88,
+          2.969375
+        ],
+        "native_explicit_silence": [
+          [
+            0.88,
+            2.57
+          ]
+        ],
+        "filled_uncovered_gap": [
+          [
+            2.57,
+            2.969375
+          ]
+        ],
+        "classification": "mixed",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": 2.45,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000000"
+            ],
+            "anchor_end": 2.4,
+            "anchor_start": 0.48,
+            "end": 2.57,
+            "start": 0.48
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      },
+      {
+        "index": 5,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_1563__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "u25f8c308c29f3d549bed7968",
+        "primary_conflict": [
+          3.55,
+          5.129375
+        ],
+        "native_explicit_silence": [
+          [
+            3.55,
+            4.64
+          ]
+        ],
+        "filled_uncovered_gap": [
+          [
+            4.64,
+            5.129375
+          ]
+        ],
+        "classification": "mixed",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": 1.39,
+            "aliases": [
+              "jmfa_000000",
+              "jmfa_000001",
+              "jmfa_000002",
+              "jmfa_000003",
+              "jmfa_000004",
+              "jmfa_000005"
+            ],
+            "anchor_end": 2.7,
+            "anchor_start": 1.44,
+            "end": 2.7,
+            "start": 1.35
+          },
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": 2.77,
+            "aliases": [
+              "jmfa_000006",
+              "jmfa_000007",
+              "jmfa_000008"
+            ],
+            "anchor_end": 4.64,
+            "anchor_start": 2.84,
+            "end": 4.64,
+            "start": 2.77
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      },
+      {
+        "index": 6,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_1301__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "uf2185d00e25d0cf201965803",
+        "primary_conflict": [
+          0.0,
+          1.05
+        ],
+        "native_explicit_silence": [
+          [
+            0.48,
+            1.05
+          ]
+        ],
+        "filled_uncovered_gap": [
+          [
+            0.0,
+            0.48
+          ]
+        ],
+        "classification": "mixed",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": 1.2,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000000"
+            ],
+            "anchor_end": 1.2,
+            "anchor_start": 0.48,
+            "end": 1.2,
+            "start": 0.48
+          },
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": 1.06,
+            "aliases": [
+              "jmfa_000001",
+              "jmfa_000002"
+            ],
+            "anchor_end": 2.32,
+            "anchor_start": 1.2,
+            "end": 2.32,
+            "start": 1.2
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      },
+      {
+        "index": 7,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo1_2037__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "u8f7edc7d107f9848360bff85",
+        "primary_conflict": [
+          1.01,
+          1.67
+        ],
+        "native_explicit_silence": [
+          [
+            1.01,
+            1.04
+          ],
+          [
+            1.04,
+            1.67
+          ]
+        ],
+        "filled_uncovered_gap": [],
+        "classification": "native_mfa",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": 0.72,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000000",
+              "jmfa_000001"
+            ],
+            "anchor_end": 0.64,
+            "anchor_start": 0.48,
+            "end": 1.04,
+            "start": 0.0
+          },
+          {
+            "acoustic_end_limit": 2.32,
+            "acoustic_start_limit": 1.05,
+            "aliases": [
+              "jmfa_000002",
+              "jmfa_000003",
+              "jmfa_000004"
+            ],
+            "anchor_end": 2.32,
+            "anchor_start": 1.44,
+            "end": 2.32,
+            "start": 1.04
+          },
+          {
+            "acoustic_end_limit": 3.84,
+            "acoustic_start_limit": 1.99,
+            "aliases": [
+              "jmfa_000005",
+              "jmfa_000006",
+              "jmfa_000007",
+              "jmfa_000008",
+              "jmfa_000009",
+              "jmfa_000010",
+              "jmfa_000011",
+              "jmfa_000012"
+            ],
+            "anchor_end": 3.84,
+            "anchor_start": 2.32,
+            "end": 3.84,
+            "start": 2.32
+          },
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000013",
+              "jmfa_000014"
+            ],
+            "anchor_end": 4.48,
+            "anchor_start": 3.84,
+            "end": 4.48,
+            "start": 3.84
+          },
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": 4.41,
+            "aliases": [
+              "jmfa_000015",
+              "jmfa_000016",
+              "jmfa_000017"
+            ],
+            "anchor_end": 5.12,
+            "anchor_start": 4.48,
+            "end": 5.12,
+            "start": 4.48
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      },
+      {
+        "index": 8,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo1_1995__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "u766bdffe7b6dab9c43bfab96",
+        "primary_conflict": [
+          1.52,
+          1.56
+        ],
+        "native_explicit_silence": [
+          [
+            1.52,
+            1.56
+          ]
+        ],
+        "filled_uncovered_gap": [],
+        "classification": "native_mfa",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000000",
+              "jmfa_000001"
+            ],
+            "anchor_end": 1.52,
+            "anchor_start": 0.48,
+            "end": 1.52,
+            "start": 0.48
+          },
+          {
+            "acoustic_end_limit": 2.56,
+            "acoustic_start_limit": 1.23,
+            "aliases": [
+              "jmfa_000002",
+              "jmfa_000003",
+              "jmfa_000004",
+              "jmfa_000005"
+            ],
+            "anchor_end": 2.56,
+            "anchor_start": 1.52,
+            "end": 2.56,
+            "start": 1.52
+          },
+          {
+            "acoustic_end_limit": 3.2,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000006",
+              "jmfa_000007",
+              "jmfa_000008",
+              "jmfa_000009"
+            ],
+            "anchor_end": 3.2,
+            "anchor_start": 2.56,
+            "end": 3.2,
+            "start": 2.56
+          },
+          {
+            "acoustic_end_limit": 4.4,
+            "acoustic_start_limit": 2.92,
+            "aliases": [
+              "jmfa_000010",
+              "jmfa_000011",
+              "jmfa_000012",
+              "jmfa_000013",
+              "jmfa_000014"
+            ],
+            "anchor_end": 4.16,
+            "anchor_start": 3.2,
+            "end": 4.52,
+            "start": 3.2
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      },
+      {
+        "index": 9,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_0986__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "udc0ca29b89456c501c3869ed",
+        "primary_conflict": [
+          4.32,
+          4.4
+        ],
+        "native_explicit_silence": [],
+        "filled_uncovered_gap": [
+          [
+            4.32,
+            4.4
+          ]
+        ],
+        "classification": "filled_gap",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": 2.34,
+            "aliases": [
+              "jmfa_000000",
+              "jmfa_000001",
+              "jmfa_000002"
+            ],
+            "anchor_end": 3.12,
+            "anchor_start": 2.48,
+            "end": 3.12,
+            "start": 2.24
+          },
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000003",
+              "jmfa_000004",
+              "jmfa_000005"
+            ],
+            "anchor_end": 4.32,
+            "anchor_start": 3.12,
+            "end": 4.32,
+            "start": 3.12
+          },
+          {
+            "acoustic_end_limit": 5.2,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000006",
+              "jmfa_000007",
+              "jmfa_000008",
+              "jmfa_000009"
+            ],
+            "anchor_end": 5.2,
+            "anchor_start": 4.4,
+            "end": 5.2,
+            "start": 4.4
+          },
+          {
+            "acoustic_end_limit": 6.4,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000010",
+              "jmfa_000011",
+              "jmfa_000012",
+              "jmfa_000013",
+              "jmfa_000014",
+              "jmfa_000015",
+              "jmfa_000016"
+            ],
+            "anchor_end": 6.24,
+            "anchor_start": 5.2,
+            "end": 6.52,
+            "start": 5.2
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      },
+      {
+        "index": 10,
+        "source_key": "ASa_Project_Karigurashi_Ren_ai/vo2_1514__ASa_Project_Karigurashi_Ren_ai",
+        "stem": "u3e4114e626ddc5d51abae8b9",
+        "primary_conflict": [
+          4.0,
+          4.08
+        ],
+        "native_explicit_silence": [
+          [
+            4.0,
+            4.08
+          ]
+        ],
+        "filled_uncovered_gap": [],
+        "classification": "native_mfa",
+        "timestamp_segments": [
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000000",
+              "jmfa_000001",
+              "jmfa_000002"
+            ],
+            "anchor_end": 1.12,
+            "anchor_start": 0.48,
+            "end": 1.12,
+            "start": 0.48
+          },
+          {
+            "acoustic_end_limit": 2.53,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000003",
+              "jmfa_000004",
+              "jmfa_000005",
+              "jmfa_000006",
+              "jmfa_000007"
+            ],
+            "anchor_end": 2.4,
+            "anchor_start": 1.12,
+            "end": 2.65,
+            "start": 1.12
+          },
+          {
+            "acoustic_end_limit": null,
+            "acoustic_start_limit": null,
+            "aliases": [
+              "jmfa_000008",
+              "jmfa_000009",
+              "jmfa_000010"
+            ],
+            "anchor_end": 4.0,
+            "anchor_start": 3.2,
+            "end": 4.0,
+            "start": 3.2
+          },
+          {
+            "acoustic_end_limit": 4.91,
+            "acoustic_start_limit": 3.77,
+            "aliases": [
+              "jmfa_000011",
+              "jmfa_000012",
+              "jmfa_000013",
+              "jmfa_000014",
+              "jmfa_000015"
+            ],
+            "anchor_end": 4.8,
+            "anchor_start": 4.0,
+            "end": 5.03,
+            "start": 4.0
+          }
+        ],
+        "punctuation_timestamps": [],
+        "user_listening_report": "User reports clear audible speech in the ten samples; preview buttons include 0.3 s context on each side, so this is not frame-specific truth for 30 ms edge cases."
+      }
+    ],
+    "mechanism": "CTC anchors determine crops; MFA itself may output blank/silence inside crops; full phone partition marks any uncovered inter-crop/leading/trailing time as silence; sp0..3 labels are duration bins (leading marker special); punctuation projects onto existing gaps only. Audio samples are never muted.",
+    "scope": "Primary displayed conflict per ten samples: 4 native-only, 5 mixed native+gap, 1 gap-only. Remaining conflicts can differ. Actual native sample4: batch-timed/0/aligned/b0189_000.TextGrid phones blank0.28..2.09 local ->0.76..2.57 original with offset0.48. No fix claimed for specific decoder cause; no acoustic rerun/production edit/restart/publication."
+  },
+  "sample4_native_database": {
+    "file_name": "b0189_000",
+    "group": 0,
+    "id": 580,
+    "begin": 0.0,
+    "end": 2.09,
+    "num_frames": 209,
+    "alignment_log_likelihood": -63.38858309659091,
+    "snr": -0.44369277628800763,
+    "speaker_id": 1,
+    "job_id": 1,
+    "speaker_name": "corpus",
+    "log_observations": [
+      "Processing 1-580",
+      "Retried 1-580",
+      "Done 1446, errors on 0"
+    ],
+    "interpretation_limit": "Non-NULL likelihood and a complete alias/phone sequence prove exported native alignment; they do not prove correct phone timing or source-quality failure."
+  }
+}

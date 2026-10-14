@@ -72,6 +72,20 @@ def test_terminal_sokuon_adds_glottal_stop_only_when_model_omits_it(tmp_path: Pa
     ('カンケイ', ('k', 'a', 'ŋ', 'k', 'eː')),
     ('ソレ', ('s', 'o', 'ɾ', 'e')),
     ('ダッ', ('d', 'a', 'ʔ')),
+    ('キッチン', ('c', 'i', 'tɕː', 'i', 'ɴ')),
+    ('ゼッタイ', ('z', 'e', 'tː', 'a', 'i')),
+    ('シュッキン', ('ɕ', 'ɨ', 'cː', 'i', 'ɴ')),
+    ('オオアワテ', ('oː', 'a', 'w', 'a', 't', 'e')),
+    ('シーズン', ('ɕ', 'iː', 'z', 'ɨ', 'ɴ')),
+    ('キョウ', ('c', 'oː')),
+    ('エー', ('eː',)),
+    ('ブー', ('b', 'ɯː')),
+    ('ブーブー', ('b', 'ɯː', 'b', 'ɯː')),
+    ('ウェイトレス', ('ɯ', 'e', 'i', 't', 'o', 'ɾ', 'e', 's', 'ɨ')),
+    ('ウェイトレス', ('w', 'e', 'i', 't', 'o', 'ɾ', 'e', 's', 'ɨ')),
+    ('ジャア', ('dʑ', 'a', 'a')),
+    ('ガッキ', ('ɡ', 'a', 'cː', 'i')),
+    ('カワイイ', ('k', 'a', 'w', 'a', 'iː')),
 ])
 def test_observed_game_g2p_has_mora_owners(reading: str, phones: tuple[str, ...]) -> None:
     token = Token(0, 0, len(reading), reading, ('名詞',), reading, 'sudachi')
@@ -80,3 +94,37 @@ def test_observed_game_g2p_has_mora_owners(reading: str, phones: tuple[str, ...]
     result = filter_mappable_pronunciations(
         (token,), (Pronunciation(reading, phones),), {0: morae}, phone_map)
     assert result[0].phones == phones
+
+
+@pytest.mark.parametrize(('points', 'reference'), [
+    (('ん', 'だ', 'けど'), '聞いたんだけどね。'),
+    (('あ', 'あ', 'ん'), '聞いたああんね。'),
+])
+def test_ctc_simultaneous_points_keep_serialized_lexical_order(
+        tmp_path: Path, points: tuple[str, ...], reference: str) -> None:
+    from tools.galgame_qwen_ctc import render_textgrid
+
+    grid = tmp_path / 'ctc.TextGrid'
+    words = [{'text': '聞いた', 'start': .2, 'end': .5}]
+    words.extend({'text': label, 'start': .5, 'end': .5} for label in points)
+    words.append({'text': 'ね', 'start': .5, 'end': .8})
+    grid.write_text(render_textgrid(1., words), encoding='utf-8')
+    result = read_ctc_words(grid, reference, 1.)
+    assert [item.text for item in result] == ['聞いた', *points, 'ね']
+    assert [(item.start, item.end) for item in result] == [
+        (.2, .5), (.5, .5), (.5, .5), (.5, .5), (.5, .8)]
+    with pytest.raises(ValueError, match='lexical'):
+        read_ctc_words(grid, '聞いた別の言葉ね。', 1.)
+
+
+def test_observed_suggoku_wrong_place_stop_is_still_rejected() -> None:
+    from japanmfa.errors import StageFailure
+
+    reading = 'スッゴク'
+    token = Token(0, 0, len(reading), reading, ('副詞',), reading, 'sudachi')
+    morae = segment_morae(token)
+    phone_map = PhoneMap.load(Path('src/japanmfa/mfa/data/japanese_mfa_v3_phone_map.yaml'))
+    pronunciation = Pronunciation(reading, ('s', 'ɨ', 'pː', 'ɡ', 'o', 'k', 'ɯ'))
+    with pytest.raises(StageFailure) as failure:
+        filter_mappable_pronunciations((token,), (pronunciation,), {0: morae}, phone_map)
+    assert failure.value.reason_code == 'no_mappable_pronunciation'

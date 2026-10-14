@@ -169,3 +169,1034 @@ rules:
     phones: [ɲ, i]
   - kana: [ヲ]
     phones: [o]
+  # Observed Japanese MFA v3 candidates in AKABEiSOFT3 air_0013–0055.
+  # Keep each model phone owner explicit, especially for long vowels and geminates.
+  - kana: [ヤ]
+    phones: [j, a]
+  - kana: [ジャ]
+    phones: [ʑ, a]
+  - kana: [キュ]
+    phones: [c, ɨ]
+  - kana: [チョ]
+    phones: [tɕ, o]
+  - kana: [チョ, ウ]
+    phones: [tɕ, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [サ]
+    phones: [s, a]
+  - kana: [ヘ]
+    phones: [h, e]
+  - kana: [ム]
+    phones: [m, ɯ]
+  - kana: [ヨ]
+    phones: [j, o]
+  - kana: [バ]
+    phones: [b, a]
+  - kana: [ビ]
+    phones: [bʲ, i]
+  - kana: [ヌ]
+    phones: [n, ɯ]
+  - kana: [ペ]
+    phones: [p, e]
+  - kana: [ゾ]
+    phones: [z, o]
+  - kana: [ズ]
+    phones: [z, ɨ]
+  - kana: [ザ]
+    phones: [dz, a]
+  - kana: [ヒ]
+    phones: [ç, i]
+  - kana: [チャ]
+    phones: [tɕ, a]
+  - kana: [キャ]
+    phones: [c, a]
+  - kana: [ディ]
+    phones: [dʲ, i]
+  - kana: [ショ]
+    phones: [ɕ, o]
+  - kana: [シュ]
+    phones: [ɕ, ɨ]
+  - kana: [ジュ]
+    phones: [dʑ, ɨ]
+  - kana: [ジ]
+    phones: [dʑ, i]
+  - kana: [ジョ]
+    phones: [dʑ, o]
+  - kana: [ン]
+    phones: [n]
+  - kana: [ン]
+    phones: [ɰ̃]
+  - kana: [ホ, ー]
+    phones: [h, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [リ, ー]
+    phones: [ɾʲ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [タ, ー]
+    phones: [t, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [デ, ー]
+    phones: [d, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ピ, ー]
+    phones: [pʲ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [カ, ー]
+    phones: [k, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ユ, ウ]
+    phones: [j, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [リュ]
+    phones: [ɾʲ, ɨ]
+  - kana: [リュ, ウ]
+    phones: [ɾʲ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, コ]
+    phones: [kː, o]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, テ]
+    phones: [tː, e]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, ショ]
+    phones: [ɕː, o]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, ト]
+    phones: [tː, o]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ン, ナ]
+    phones: [n, a]
+    mora_spans: [[0, 2], [1, 2]]
+
+  # Observed in 0verflow_Shiny_Days; see galgame-mfa-all/mapping-diagnostics/report.json.
+  - kana: [ッ, チ]
+    phones: [tɕː, i]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, タ]
+    phones: [tː, a]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, キ]
+    phones: [cː, i]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [オ, オ]
+    phones: [oː]
+    mora_spans: [[0, 2]]
+  - kana: [シ, ー]
+    phones: [ɕ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [キョ, ウ]
+    phones: [c, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [エ, ー]
+    phones: [eː]
+    mora_spans: [[0, 2]]
+  - kana: [ブ, ー]
+    phones: [b, ɯː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ウェ]
+    phones: [ɯ, e]
+  - kana: [ウェ]
+    phones: [w, e]
+  - kana: [ジャ]
+    phones: [dʑ, a]
+  - kana: [イ, イ]
+    phones: [iː]
+    mora_spans: [[0, 2]]
+
+  # Exact candidates from the first GalgameMFA 500-item batch; diagnostic evidence is local.
+  - kana: [フェ]
+    phones: [ɸ, e]
+  - kana: [ギ]
+    phones: [ɟ, i]
+  - kana: [シャ]
+    phones: [ɕ, a]
+  - kana: [チェ]
+    phones: [tɕ, e]
+  - kana: [ボ]
+    phones: [b, o]
+  - kana: [ザ]
+    phones: [z, a]
+  - kana: [ン]
+    phones: [m]
+  - kana: [プ]
+    phones: [p, ɯ]
+  - kana: [チュ]
+    phones: [tɕ, ɨ]
+  - kana: [ニュ]
+    phones: [ɲ, ɨ]
+  - kana: [テ, ー]
+    phones: [t, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ネ, エ]
+    phones: [n, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ジュ, ー]
+    phones: [dʑ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ニュ, ー]
+    phones: [ɲ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ボ, ー]
+    phones: [b, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [チュ, ウ]
+    phones: [tɕ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ニ, ー]
+    phones: [ɲ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [フ, ー]
+    phones: [ɸ, ɯː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ダ, ー]
+    phones: [d, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ビ, ー]
+    phones: [bʲ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [レ, ー]
+    phones: [ɾ, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ナ, ー]
+    phones: [n, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ボ, ウ]
+    phones: [b, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ゴ, ウ]
+    phones: [ɡ, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [バ, ー]
+    phones: [b, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [コ, ー]
+    phones: [k, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ディ, ー]
+    phones: [dʲ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ン, ナ]
+    phones: [nː, a]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ン, ニ]
+    phones: [ɲː, i]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ン, メ]
+    phones: [mː, e]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, シュ]
+    phones: [ɕː, ɨ]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, カ]
+    phones: [kː, a]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, ケ]
+    phones: [kː, e]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, パ]
+    phones: [pː, a]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, シャ]
+    phones: [ɕː, a]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, ツ]
+    phones: [tsː, ɨ]
+    mora_spans: [[0, 2], [1, 2]]
+  # Exact real G2P evidence from resumed500 batch d8fb724f; no deleted/inserted phones.
+  - kana: [ア, ー]
+    phones: [aː]
+    mora_spans: [[0, 2]]
+  - kana: [ヘ, ー]
+    phones: [h, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [サ, ー]
+    phones: [s, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ハ, ー]
+    phones: [h, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ギャ]
+    phones: [ɟ, a]
+  - kana: [リャ]
+    phones: [ɾʲ, a]
+  - kana: [リョ]
+    phones: [ɾʲ, o]
+  - kana: [ズ]
+    phones: [dz, ɨ]
+  - kana: [ヅ]
+    phones: [dz, ɨ]
+  - kana: [コ, ウ]
+    phones: [k, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ゾ, ウ]
+    phones: [dz, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, ク]
+    phones: [kː, ɯ]
+    mora_spans: [[0, 2], [1, 2]]
+
+  # Exact retained real G2P requests from resumed2000; no missing/inserted phones.
+  - kana: [シャ, ー]
+    phones: [ɕ, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ベ, ー]
+    phones: [b, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ジュ, ウ]
+    phones: [ʑ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [チ, イ]
+    phones: [tɕ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, プ]
+    phones: [pː, ɯ]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, ポ]
+    phones: [pː, o]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, ジ]
+    phones: [dʑː, i]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ル, ー]
+    phones: [ɾ, ɯː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ケ, ー]
+    phones: [k, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [チ, ー]
+    phones: [tɕ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ニ, イ]
+    phones: [ɲ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ショ, ー]
+    phones: [ɕ, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ヒュ, ー]
+    phones: [ç, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, チャ]
+    phones: [tɕː, a]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, サ]
+    phones: [sː, a]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, セ]
+    phones: [sː, e]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ヅ]
+    phones: [z, ɨ]
+  - kana: [ゴ, ー]
+    phones: [ɡ, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [マ, ー]
+    phones: [m, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ト, ー]
+    phones: [t, oː]
+    mora_spans: [[0, 1], [0, 2]]
+
+  # Exact observed production model requests, resumed3500.
+  - kana:
+    - ポ
+    phones:
+    - p
+    - o
+  - kana:
+    - ミャ
+    phones:
+    - mʲ
+    - a
+  - kana:
+    - ピ
+    phones:
+    - pʲ
+    - i
+  - kana:
+    - ヒ
+    - ー
+    phones:
+    - ç
+    - iː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ヤ
+    - ー
+    phones:
+    - j
+    - aː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ラ
+    - ー
+    phones:
+    - ɾ
+    - aː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - チェ
+    - ー
+    phones:
+    - tɕ
+    - eː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ガ
+    - ー
+    phones:
+    - ɡ
+    - aː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ッ
+    - ツァ
+    phones:
+    - tsː
+    - a
+    mora_spans:
+    - - 0
+      - 2
+    - - 1
+      - 2
+  - kana:
+    - ウ
+    - ー
+    phones:
+    - ɯː
+    mora_spans:
+    - - 0
+      - 2
+
+  # Exact retained real model requests, resumed4500; no deleted or inserted phones.
+  - kana:
+    - ジェ
+    phones:
+    - dʑ
+    - e
+  - kana:
+    - ジュ
+    phones:
+    - ʑ
+    - ɨ
+  - kana:
+    - ワ
+    - ー
+    phones:
+    - w
+    - aː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ノ
+    - ウ
+    phones:
+    - n
+    - oː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ゲ
+    - ー
+    phones:
+    - ɡ
+    - eː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ペ
+    - ー
+    phones:
+    - p
+    - eː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ネ
+    - ー
+    phones:
+    - n
+    - eː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ジャ
+    - ー
+    phones:
+    - ʑ
+    - aː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ッ
+    - ケ
+    - ー
+    phones:
+    - kː
+    - eː
+    mora_spans:
+    - - 0
+      - 2
+    - - 1
+      - 3
+  - kana:
+    - ッ
+    - ピ
+    phones:
+    - pʲː
+    - i
+    mora_spans:
+    - - 0
+      - 2
+    - - 1
+      - 2
+
+  # Exact retained real requests, resumed5000; full phones and locked morae only.
+  - kana:
+    - ヒャ
+    phones:
+    - ç
+    - a
+  - kana:
+    - ミョ
+    phones:
+    - mʲ
+    - o
+  - kana:
+    - キャ
+    - ー
+    phones:
+    - c
+    - aː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - グ
+    - ー
+    phones:
+    - ɡ
+    - ɯː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - ク
+    - ー
+    phones:
+    - k
+    - ɯː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+  - kana:
+    - シ
+    - イ
+    phones:
+    - ɕ
+    - iː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+
+  # Exact retained real requests, resumed5500; full phones and locked morae only.
+  - kana:
+    - ギョ
+    phones:
+    - ɟ
+    - o
+  - kana:
+    - プ
+    - ー
+    phones:
+    - p
+    - ɯː
+    mora_spans:
+    - - 0
+      - 1
+    - - 0
+      - 2
+
+  # 2026-10-08: exact production G2P variants; ambiguous and missing-phone candidates excluded.
+  - kana: [ティ]
+    phones: [tʲ, i]
+  - kana: [ロ, ー]
+    phones: [ɾ, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ファ]
+    phones: [ɸ, a]
+  - kana: [ニャ]
+    phones: [ɲ, a]
+  - kana: [フィ]
+    phones: [ɸʲ, i]
+  - kana: [ノ, ー]
+    phones: [n, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [キ, ー]
+    phones: [c, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, ド]
+    phones: [dː, o]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ユ, ー]
+    phones: [j, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [フォ]
+    phones: [ɸ, o]
+  - kana: [ソ, ー]
+    phones: [s, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ニョ]
+    phones: [ɲ, o]
+  - kana: [モ, ー]
+    phones: [m, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ミ, ー]
+    phones: [mʲ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [イ, ー]
+    phones: [iː]
+    mora_spans: [[0, 2]]
+  - kana: [チュ, ー]
+    phones: [tɕ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ポ, ー]
+    phones: [p, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ザ, ー]
+    phones: [z, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ピュ]
+    phones: [pʲ, ɨ]
+  - kana: [ウィ]
+    phones: [w, i]
+  - kana: [ッ, シ]
+    phones: [ɕː, i]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ジェ]
+    phones: [ʑ, e]
+  - kana: [ゾ]
+    phones: [dz, o]
+  - kana: [シェ]
+    phones: [ɕ, e]
+  - kana: [フォ, ー]
+    phones: [ɸ, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [シュ, ー]
+    phones: [ɕ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [キュ, ー]
+    phones: [c, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ギュ]
+    phones: [ɟ, ɨ]
+  - kana: [チャ, ー]
+    phones: [tɕ, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ド, ー]
+    phones: [d, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [セ, ー]
+    phones: [s, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, ス]
+    phones: [sː, ɨ]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ツ, ー]
+    phones: [ts, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ティ, ー]
+    phones: [tʲ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ビュ]
+    phones: [bʲ, ɨ]
+  - kana: [ジ, ー]
+    phones: [ʑ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ファ, ー]
+    phones: [ɸ, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ジャ, ー]
+    phones: [dʑ, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [リュ, ー]
+    phones: [ɾʲ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ビュ, ー]
+    phones: [bʲ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ヨ, ー]
+    phones: [j, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ム, ー]
+    phones: [m, ɯː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ヒュ]
+    phones: [ç, ɨ]
+  - kana: [ジ, ー]
+    phones: [dʑ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, グ]
+    phones: [ɡː, ɯ]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [フィ, ー]
+    phones: [ɸʲ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ヴァ]
+    phones: [v, a]
+  - kana: [ミュ]
+    phones: [mʲ, ɨ]
+  - kana: [ヴィ]
+    phones: [vʲ, i]
+  - kana: [ギ, ー]
+    phones: [ɟ, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ドゥ]
+    phones: [d, ɯ]
+  - kana: [ヂ]
+    phones: [ʑ, i]
+  - kana: [ピョ]
+    phones: [pʲ, o]
+  - kana: [ッ, ペ]
+    phones: [pː, e]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ピュ, ー]
+    phones: [pʲ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ウォ]
+    phones: [w, o]
+  - kana: [ッ, キュ]
+    phones: [cː, ɨ]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ウォ, ー]
+    phones: [w, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ザ, ー]
+    phones: [dz, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ニャ, ー]
+    phones: [ɲ, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [トゥ]
+    phones: [t, ɯ]
+  - kana: [ヌ, ー]
+    phones: [n, ɯː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ジョ, ー]
+    phones: [dʑ, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, チョ]
+    phones: [tɕː, o]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ッ, ティ]
+    phones: [tʲː, i]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [デュ]
+    phones: [dʲ, ɨ]
+  - kana: [ジュ, ー]
+    phones: [ʑ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, ソ]
+    phones: [sː, o]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ミュ, ー]
+    phones: [mʲ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [デュ, ー]
+    phones: [dʲ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ウェ, ー]
+    phones: [w, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, ズ]
+    phones: [dzː, ɨ]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ギャ, ー]
+    phones: [ɟ, aː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ヴ]
+    phones: [v, ɯ]
+  - kana: [ウィ, ー]
+    phones: [w, iː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [チョ, ー]
+    phones: [tɕ, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, キョ]
+    phones: [cː, o]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ジョ, ー]
+    phones: [ʑ, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ゾ, ー]
+    phones: [dz, oː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, キャ]
+    phones: [cː, a]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ツェ]
+    phones: [ts, e]
+  - kana: [フュ, ー]
+    phones: [ɸʲ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ズ, ー]
+    phones: [dz, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ッ, ハ]
+    phones: [hː, a]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: [ギュ, ー]
+    phones: [ɟ, ɨː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [ゼ, ー]
+    phones: [dz, eː]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: [トゥ, ー]
+    phones: [t, ɯː]
+    mora_spans: [[0, 1], [0, 2]]
+
+  # Private candidate: observed long-vowel, geminate-long-vowel and nasal spans.
+  - kana: ["リョ", "ウ"]
+    phones: ["ɾʲ", "oː"]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: ["シュ", "ウ"]
+    phones: ["ɕ", "ɨː"]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: ["ッ", "キ", "ー"]
+    phones: ["cː", "iː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "ホ", "ー"]
+    phones: ["hː", "oː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "セ", "ー"]
+    phones: ["sː", "eː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "ピ", "ー"]
+    phones: ["pʲː", "iː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "サ", "ー"]
+    phones: ["sː", "aː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ン", "ミ"]
+    phones: ["mʲː", "i"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ン", "モ"]
+    phones: ["mː", "o"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ン", "マ"]
+    phones: ["mː", "a"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ン", "ネ"]
+    phones: ["nː", "e"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ン", "マ", "ー"]
+    phones: ["mː", "aː"]
+    mora_spans: [[0, 2], [1, 3]]
+
+  # 2026-10-08: pinned dictionary and actual G2P rare-phone contexts.
+  - kana: ["ッ", "バ"]
+    phones: ["bː", "a"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "バ", "ー"]
+    phones: ["bː", "aː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "ブ"]
+    phones: ["bː", "ɯ"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ビ"]
+    phones: ["bʲː", "i"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ディ"]
+    phones: ["dʲː", "i"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ラ"]
+    phones: ["ɾː", "a"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ラ", "ー"]
+    phones: ["ɾː", "aː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "リ"]
+    phones: ["ɾʲː", "i"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "リ", "ー"]
+    phones: ["ɾʲː", "iː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ン"]
+    phones: ["ɴː"]
+    mora_spans: [[0, 1]]
+  - kana: ["ン", "ー"]
+    phones: ["ɴː"]
+    mora_spans: [[0, 2]]
+  - kana: ["ッ", "ワ", "ー"]
+    phones: ["wː", "aː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "ヒ"]
+    phones: ["çː", "i"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ギ"]
+    phones: ["ɟː", "i"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ギ", "ー"]
+    phones: ["ɟː", "iː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "ギュ"]
+    phones: ["ɟː", "ɨ"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ギョ"]
+    phones: ["ɟː", "o"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "フ"]
+    phones: ["ɸː", "ɯ"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ファ"]
+    phones: ["ɸː", "a"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ファ", "ー"]
+    phones: ["ɸː", "aː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "フェ"]
+    phones: ["ɸː", "e"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "フォ"]
+    phones: ["ɸː", "o"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "フィ"]
+    phones: ["ɸʲː", "i"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "フィ", "ー"]
+    phones: ["ɸʲː", "iː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "ダ"]
+    phones: ["dː", "a"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ダ", "ー"]
+    phones: ["dː", "aː"]
+    mora_spans: [[0, 2], [1, 3]]
+  - kana: ["ッ", "ホ"]
+    phones: ["hː", "o"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ヴェ"]
+    phones: ["v", "e"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["ヴォ"]
+    phones: ["v", "o"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["ヴェ", "ー"]
+    phones: ["v", "eː"]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: ["ヴォ", "ー"]
+    phones: ["v", "oː"]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: ["ヴァ", "ー"]
+    phones: ["v", "aː"]
+    mora_spans: [[0, 1], [0, 2]]
+  - kana: ["ヴィ", "ー"]
+    phones: ["vʲ", "iː"]
+    mora_spans: [[0, 1], [0, 2]]
+
+  # 2026-10-08: devoiced vowels attested in complete pinned-dictionary pronunciations.
+  - kana: ["キ"]
+    phones: ["c", "i̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["ク"]
+    phones: ["k", "ɯ̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["シ"]
+    phones: ["ɕ", "i̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["ス"]
+    phones: ["s", "ɨ̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["チ"]
+    phones: ["tɕ", "i̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["ッ", "キ"]
+    phones: ["cː", "i̥"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ク"]
+    phones: ["kː", "ɯ̥"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "シュ"]
+    phones: ["ɕː", "ɨ̥"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ス"]
+    phones: ["sː", "ɨ̥"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "チ"]
+    phones: ["tɕː", "i̥"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ツ"]
+    phones: ["tsː", "ɨ̥"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "ティ"]
+    phones: ["tʲː", "i̥"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ッ", "プ"]
+    phones: ["pː", "ɯ̥"]
+    mora_spans: [[0, 2], [1, 2]]
+  - kana: ["ツ"]
+    phones: ["ts", "ɨ̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["ティ"]
+    phones: ["tʲ", "i̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["ヒ"]
+    phones: ["ç", "i̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["ピ"]
+    phones: ["pʲ", "i̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["フ"]
+    phones: ["ɸ", "ɯ̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["フィ"]
+    phones: ["ɸʲ", "i̥"]
+    mora_spans: [[0, 1], [0, 1]]
+  - kana: ["プ"]
+    phones: ["p", "ɯ̥"]
+    mora_spans: [[0, 1], [0, 1]]

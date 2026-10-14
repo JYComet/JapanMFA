@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from praatio import textgrid as praat_textgrid
 
 from japanmfa.audio import AudioInfo
 from japanmfa.accent.tdmelodic import resolve_tdmelodic_command
@@ -231,6 +232,112 @@ def test_fake_backends_write_valid_word_and_phone_tiers_and_reports(tmp_path: Pa
     assert '"status": "aligned"' in (tmp_path / "output" / "manifest.jsonl").read_text()
 
 
+def test_whole_mode_uses_full_wav_and_still_reviews_ctc(tmp_path: Path) -> None:
+    from japanmfa.asr.qwen3 import ASRResult, Timestamp
+
+    class TimedAsr:
+        def transcribe(self, paths, *, reference_texts=None):
+            return {path: ASRResult(path, "Japanese", "今日", "fake", "ctc", "今日",
+                                    (Timestamp("今日", .3, .7),), ()) for path in paths}
+
+    class RecordingMfa(FakeMfa):
+        def __init__(self):
+            super().__init__()
+            self.frames = []
+
+        def align(self, corpus_dir, dictionary, output_dir, work_dir):
+            with wave.open(str(next(corpus_dir.glob("*.wav"))), "rb") as audio:
+                self.frames.append(audio.getnframes())
+            return super().align(corpus_dir, dictionary, output_dir, work_dir)
+
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "ok", "今日")
+    runner = RecordingMfa()
+    pipeline = _pipeline(mfa=runner, asr=TimedAsr())
+    pipeline.alignment_mode = "whole"
+    result = pipeline.run(corpus, tmp_path / "output", None)
+
+    assert runner.frames == [16000]
+    report = json.loads((tmp_path / "output" / "ok" / "postprocess.json").read_text())
+    assert "timestamp_alignment" in report
+    mfa_receipt = json.loads((tmp_path / "output" / "ok" / "mfa.json").read_text())
+    assert "/segments/" not in mfa_receipt["textgrid"]
+    assert result.outcomes[0].status == "aligned"
+
+
+def test_ctc_word_fusion_keeps_phone_tiers_on_one_axis(tmp_path: Path) -> None:
+    from japanmfa.asr.qwen3 import ASRResult, Timestamp
+    from japanmfa.output.textgrid import _parse
+
+    class TimedAsr:
+        def transcribe(self, paths, *, reference_texts=None):
+            return {path: ASRResult(path, "Japanese", "今日", "fake", "ctc", "今日",
+                                    (Timestamp("今日", .2, .5),), ()) for path in paths}
+
+    class PaddedMfa(FakeMfa):
+        def align(self, corpus_dir, dictionary, output_dir, work_dir):
+            path = super().align(corpus_dir, dictionary, output_dir, work_dir)
+            grid = path.read_text().replace(
+                'xmin = 0\n            xmax = 1\n            text = "jmfa_000000"',
+                'xmin = 0.2\n            xmax = 0.7\n            text = "jmfa_000000"',
+            ).replace('xmin = 0\n            xmax = 0.3\n            text = "k"',
+                      'xmin = 0.2\n            xmax = 0.35\n            text = "k"').replace(
+                'xmin = 0.3\n            xmax = 0.6\n            text = "jo"',
+                'xmin = 0.35\n            xmax = 0.5\n            text = "jo"',
+            ).replace('xmin = 0.6\n            xmax = 1\n            text = "u"',
+                      'xmin = 0.5\n            xmax = 0.7\n            text = "u"')
+            path.write_text(grid)
+            return path
+
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "ok", "今日")
+    samples = array.array("h", [0] * 16000)
+    for index in range(round(.2 * 16000), round(.55 * 16000)):
+        samples[index] = int(8000 * math.sin(2 * math.pi * 200 * index / 16000))
+    with wave.open(str(corpus / "ok.wav"), "wb") as audio:
+        audio.setparams((1, 2, 16000, 0, "NONE", "not compressed"))
+        audio.writeframes(samples.tobytes())
+    pipeline = _pipeline(mfa=PaddedMfa(), asr=TimedAsr())
+    pipeline.alignment_mode = "whole"
+
+    outcome = pipeline.run(corpus, tmp_path / "output", None).outcomes[0]
+
+    assert outcome.status == "aligned"
+    artifact = tmp_path / "output" / "ok"
+    report = json.loads((artifact / "postprocess.json").read_text())
+    assert report["ctc_word_fusion"]["edits"][0]["edge"] == "end"
+    _, _, tiers = _parse(artifact / "ok.TextGrid")
+    words = next(tier for tier in tiers if tier.name == "words")
+    phones = next(tier for tier in tiers if tier.name == "phones")
+    kana = next(tier for tier in tiers if tier.name == "phone_kana")
+    tone = next(tier for tier in tiers if tier.name == "phone_tone")
+    assert words.intervals[1].end <= .6
+    assert [(x.start, x.end) for x in phones.intervals] == [
+        (x.start, x.end) for x in kana.intervals
+    ] == [(x.start, x.end) for x in tone.intervals]
+
+
+def test_prepare_mfa_inputs_locks_words_without_running_mfa(tmp_path: Path) -> None:
+    class ForbiddenMfa:
+        def align(self, *args):
+            raise AssertionError("preparation must not align")
+
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "ok")
+    prepared = _pipeline(mfa=ForbiddenMfa()).prepare_mfa_inputs(
+        corpus, tmp_path / "prepared", None,
+    )
+
+    assert not prepared.failures
+    assert len(prepared.items) == 1
+    item = prepared.items[0]
+    assert item.utterance_id == "ok"
+    assert item.aliases == ("jmfa_000000",)
+    assert item.corpus_audio.is_file()
+    assert item.dictionary.is_file()
+    assert not (item.artifact_dir / "ok.TextGrid").exists()
+
+
 def test_punctuation_groups_preserve_consecutive_source_order() -> None:
     assert _punctuation_groups("今日は！？…") == ("！？…",)
     assert _punctuation_groups("ー") == ()
@@ -390,6 +497,33 @@ def test_malformed_tdmelodic_fails_one_item_and_continues(tmp_path: Path) -> Non
 
     assert [outcome.status for outcome in result.outcomes] == ["failed", "failed"]
     assert all(outcome.reason_code == "malformed_output" for outcome in result.outcomes)
+
+
+def test_malformed_pitch_markers_with_intact_reading_publish_explicit_unknown_tone(tmp_path: Path) -> None:
+    from japanmfa.cache import StageCache
+
+    class MalformedMarkerAccent:
+        def predict(self, _requests):
+            return {0: "キョ]ウ["}
+
+    corpus = tmp_path / "corpus"
+    _write_audio(corpus, "unknown")
+
+    pipeline = _pipeline(accent=MalformedMarkerAccent())
+    pipeline.cache = StageCache(tmp_path / "cache")
+    result = pipeline.run(corpus, tmp_path / "output", None)
+
+    assert result.outcomes[0].status == "aligned"
+    grid = praat_textgrid.openTextgrid(str(tmp_path / "output/unknown/unknown.TextGrid"), includeEmptyIntervals=True)
+    assert "??" in [row.label for row in grid.getTier("phone_tone").entries]
+    mora = json.loads((tmp_path / "output/unknown/mora.json").read_text())
+    assert mora["unknown_tone_indices"] == {"0": "malformed_output_exact_reading"}
+    for name in ("alignment.json", "postprocess.json"):
+        report = json.loads((tmp_path / "output/unknown" / name).read_text())
+        assert report["tone_source"] == "tdmelodic_predicted_with_explicit_unknown"
+        assert report["unknown_tone_phone_count"] > 0
+        if name == "alignment.json":
+            assert report["tone_encoding"] == "HH_LL_HL_LH_??"
 
 
 def test_mfa_failure_isolated_from_valid_item(tmp_path: Path) -> None:

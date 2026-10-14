@@ -16,11 +16,14 @@ import traceback
 import unicodedata
 import wave
 import math
-from dataclasses import dataclass
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import nullcontext
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
-from .accent.parser import parse_accent
+from .accent.parser import parse_accent_or_untoned
 from .accent.tdmelodic import AccentRequest, TdmelodicClient, resolve_tdmelodic_command
 from .asr.qwen3 import ASRResult, Qwen3ASRClient, Timestamp
 from .audio import AudioInfo, AudioNormalizer
@@ -44,12 +47,14 @@ from .frontend.overrides import (
     apply_reading_overrides,
     load_reading_overrides,
 )
+from .mfa.preparation_cache import PreparationCache
 from .mfa.g2p import MfaG2pClient
 from .mfa.lexicon import LockedLexicon
 from .mfa.phone_map import PhoneMap
 from .mfa.runner import MfaRunner
 from .mfa.timed import TimedSegment, align_timed_segments, expand_timed_segments_with_audio, plan_timed_segments
 from .mfa.timing_review import review_processed_timing
+from .mfa.word_fusion import fuse_word_boundaries
 from .mfa.textgrid import MfaAlignment, parse_mfa_textgrid
 from .output.reports import (
     _redact_string,
@@ -71,6 +76,61 @@ class BatchResult:
     summary_path: Path
     output_root: Path
     summary: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class PreparationState:
+    phase: str
+    utterance: Utterance
+    values: Mapping[str, Any]
+    files: Mapping[Path, str]
+    identity: str
+
+
+def _preparation_identity(config, mode):
+    return stage_fingerprint("prepared-handoff", {"audio": config.audio,
+                             "mfa": config.mfa, "validation": config.validation, "mode": mode,
+                             "phone_map": Path(__file__).parent / "mfa/data/japanese_mfa_v3_phone_map.yaml"})
+
+
+def _preparation_state(phase, utterance, values, asr, config, mode):
+    paths = [utterance.audio_path, values["audio_info"].working_path]
+    if utterance.text_path is not None:
+        paths.append(utterance.text_path)
+    grids = getattr(asr, "grids", {})
+    if utterance.utterance_id in grids:
+        paths.append(Path(grids[utterance.utterance_id]))
+    files = {Path(path): hashlib.sha256(Path(path).read_bytes()).hexdigest() for path in paths}
+    if phase == "prepared":
+        for path in (values["dictionary_path"], values["corpus_audio"]):
+            files[path] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return PreparationState(phase, utterance, values, files, _preparation_identity(config, mode))
+
+
+@dataclass(frozen=True)
+class MfaPrepared:
+    utterance_id: str
+    artifact_dir: Path
+    corpus_audio: Path
+    dictionary: Path
+    working_audio: Path
+    aliases: tuple[str, ...]
+    segments: tuple[TimedSegment, ...]
+    state: PreparationState | None = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class MfaFrontend:
+    utterance_id: str
+    tokens: tuple[Token, ...]
+    payload: dict[str, object]
+    state: PreparationState | None = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class MfaPreparationBatch:
+    items: tuple[MfaPrepared, ...]
+    failures: tuple[UtteranceOutcome, ...]
 
 
 def _source_from_asr(text: str) -> SourceText:
@@ -230,6 +290,7 @@ def _publish_final_outputs(
     staged_marker = staging / complete_marker.name
     try:
         annotations = publication_phone_partition(duration, annotations, words=words)
+        unknown_tone_phone_count = sum(item.tone_label == "??" for item in annotations)
         write_five_tier_textgrid(staged_grid, duration, source, kana, annotations, words=words)
         validate_five_tier_textgrid(staged_grid, duration, silence_labels)
         write_json(
@@ -239,8 +300,10 @@ def _publish_final_outputs(
                 "duration": duration,
                 "phones": annotation_rows(annotations),
                 "words": [{"start": start, "end": end, "label": label} for start, end, label in words],
-                "tone_encoding": "HH_LL_HL_LH",
-                "tone_source": "tdmelodic_predicted_mora_accent_not_measured_f0",
+                "tone_encoding": "HH_LL_HL_LH_??" if unknown_tone_phone_count else "HH_LL_HL_LH",
+                "tone_source": ("tdmelodic_predicted_with_explicit_unknown" if unknown_tone_phone_count
+                                else "tdmelodic_predicted_mora_accent_not_measured_f0"),
+                **({"unknown_tone_phone_count": unknown_tone_phone_count} if unknown_tone_phone_count else {}),
                 "audio": str(final_audio),
                 "audio_receipt": str(final_audio_json),
                 "audio_sha256": audio_receipt.get("working_sha256"),
@@ -550,6 +613,40 @@ def _morae_from_payload(payload: list[dict[str, object]]) -> dict[int, tuple[Mor
     return result
 
 
+_worker_pipeline = None
+
+
+def _initialize_preparation_worker(pipeline):
+    global _worker_pipeline
+    _worker_pipeline = pipeline
+    if pipeline.frontend is None:
+        pipeline.frontend = JapaneseFrontend()
+
+
+def _prepare_worker(request):
+    utterance, output, overrides, cache_root, frontend_only, resume = request
+    return _worker_pipeline._run_utterance(utterance, output, overrides, PreparationCache(cache_root),
+                                          frontend_only=frontend_only,
+                                          prepare_only=not frontend_only, resume=resume)
+
+
+def _initialize_review_worker(pipeline):
+    global _worker_pipeline
+    _worker_pipeline = pipeline
+
+
+def _review_worker(request):
+    item, output_root, cache_root = request
+    if item.state is None:
+        raise ValueError("prepared review requires a verified preparation state")
+    result = _worker_pipeline._run_utterance(
+        item.state.utterance, output_root, ReadingOverrideSet({}),
+        StageCache(cache_root), resume=item.state,
+    )
+    assert isinstance(result, UtteranceOutcome)
+    return result
+
+
 class JapanMFAPipeline:
     """Run all Japanese alignment stages while isolating each utterance."""
 
@@ -565,7 +662,13 @@ class JapanMFAPipeline:
         mfa_runner: Any | None = None,
         phone_map: PhoneMap | None = None,
         cache: Any | None = None,
+        alignment_mode: Literal["timed", "whole"] = "timed",
+        batch_preparation: bool = False,
+        preparation_workers: int = 1,
+        review_workers: int = 1,
     ) -> None:
+        if alignment_mode not in {"timed", "whole"}:
+            raise ValueError("alignment_mode must be timed or whole")
         self.config = config or PipelineConfig()
         self.audio_normalizer = audio_normalizer
         self.asr_client = asr_client
@@ -575,11 +678,19 @@ class JapanMFAPipeline:
         self.mfa_runner = mfa_runner
         self.phone_map = phone_map
         self.cache = cache
+        self.alignment_mode = alignment_mode
+        self.batch_preparation = batch_preparation
+        if preparation_workers not in {1, 4, 8}:
+            raise ValueError("preparation workers must be 1, 4 or 8")
+        self.preparation_workers = preparation_workers
+        if review_workers not in {1, 2, 4, 8}:
+            raise ValueError("review workers must be 1, 2, 4 or 8")
+        self.review_workers = review_workers
 
-    def _defaults(self, artifact_dir: Path) -> tuple[Any, ...]:
+    def _defaults(self, artifact_dir: Path, prepared: bool = False) -> tuple[Any, ...]:
         audio = self.audio_normalizer or AudioNormalizer(self.config)
         asr = self.asr_client or Qwen3ASRClient(self.config.commands.asr_worker, self.config.asr.model, self.config.asr.aligner_model)
-        frontend = self.frontend or JapaneseFrontend()
+        frontend = self.frontend or (None if prepared else JapaneseFrontend())
         accent = self.accent_client or TdmelodicClient(resolve_tdmelodic_command())
         g2p = self.g2p_client or MfaG2pClient(self.config.commands.mfa, self.config.mfa.g2p_model)
         phone_map = self.phone_map or PhoneMap.load(
@@ -646,6 +757,7 @@ class JapanMFAPipeline:
         outcomes: list[UtteranceOutcome] = []
         for utterance in utterances:
             outcome = self._run_utterance(utterance, output_root, override_set, cache)
+            assert isinstance(outcome, UtteranceOutcome)
             outcomes.append(outcome)
             append_manifest(
                 manifest_path,
@@ -657,13 +769,130 @@ class JapanMFAPipeline:
         write_json(summary_path, summary)
         return BatchResult(tuple(outcomes), manifest_path, summary_path, output_root, summary)
 
+    def prepare_mfa_inputs(
+        self, input_root: Path, output_root: Path, overrides: Path | None,
+    ) -> MfaPreparationBatch:
+        """Run all deterministic stages through locked MFA input preparation."""
+        input_root = Path(input_root).resolve()
+        requested_output = Path(output_root).absolute()
+        _reject_symlink_components(requested_output)
+        output_root = requested_output.resolve(strict=False)
+        cache_root = Path(getattr(self.cache, "root", self.config.paths.cache_dir)).absolute()
+        _reject_symlink_components(cache_root)
+        cache_root = cache_root.resolve(strict=False)
+        if not input_root.is_dir() or _paths_overlap(input_root, output_root):
+            raise ValueError("preparation input and output must be distinct directories")
+        if _paths_overlap(input_root, cache_root) or _paths_overlap(output_root, cache_root):
+            raise ValueError("preparation cache must be separate from input and output")
+        utterances = discover_utterances(input_root)
+        override_set = ReadingOverrideSet({}) if overrides is None else load_reading_overrides(Path(overrides).resolve())
+        cache = self.cache or StageCache(cache_root)
+        _ensure_output_directory(output_root)
+        for utterance in utterances:
+            _safe_output_path(output_root, utterance.utterance_id)
+        items: list[MfaPrepared] = []
+        failures: list[UtteranceOutcome] = []
+        workers = self.preparation_workers
+        manager = (ProcessPoolExecutor(max_workers=workers, mp_context=multiprocessing.get_context("spawn"),
+                                       initializer=_initialize_preparation_worker, initargs=(self,))
+                   if workers > 1 else nullcontext(None))
+        with manager as pool:
+            def execute(selected, frontend_only, states):
+                if pool is None:
+                    return (self._run_utterance(item, output_root, override_set, cache,
+                                               frontend_only=frontend_only, prepare_only=not frontend_only,
+                                               resume=states.get(item.utterance_id)) for item in selected)
+                return pool.map(_prepare_worker,
+                                ((item, output_root, override_set, cache.root, frontend_only,
+                                  states.get(item.utterance_id)) for item in selected), chunksize=4)
+            frontend_states = {}
+            if self.batch_preparation:
+                from .mfa.bulk_preparation import prime_preparation_cache
+                frontends = []
+                valid = []
+                for utterance, result in zip(utterances, execute(utterances, True, {})):
+                    if isinstance(result, MfaFrontend):
+                        frontends.append(result)
+                        frontend_states[utterance.utterance_id] = result.state
+                        valid.append(utterance)
+                    else:
+                        failures.append(result)
+                _, _, _, accent, g2p, _, _ = self._defaults(output_root, prepared=True)
+                native_failures = prime_preparation_cache(frontends, cache, accent, g2p, self.config.mfa.g2p_model,
+                                        output_root / "batch-native-preparation")
+                for item in frontends:
+                    if item.utterance_id in native_failures:
+                        exc = native_failures[item.utterance_id]
+                        write_json(output_root / item.utterance_id / "preparation-failure.json", {
+                            "stage": exc.stage, "reason": exc.reason_code, "message": exc.message,
+                            "details": exc.details, "native_evidence": str(output_root / "batch-native-preparation")})
+                        failures.append(UtteranceOutcome(item.utterance_id, "failed", exc.reason_code, exc.message,
+                                                         output_root / item.utterance_id, {}))
+                utterances = [item for item in valid if item.utterance_id not in native_failures]
+            for utterance, result in zip(utterances, execute(utterances, False, frontend_states)):
+                if isinstance(result, MfaPrepared):
+                    items.append(result)
+                else:
+                    failures.append(result)
+        return MfaPreparationBatch(tuple(items), tuple(failures))
+
+    def review_mfa_inputs(self, preparation: MfaPreparationBatch, output_root: Path) -> BatchResult:
+        """Resume verified locked input at alignment, retaining all final quality gates."""
+        output_root = Path(output_root).absolute()
+        _reject_symlink_components(output_root)
+        for item in preparation.items:
+            if item.state is None:
+                raise ValueError("prepared review requires a verified preparation state")
+            input_root = item.state.utterance.audio_path.parent.resolve()
+            if _paths_overlap(input_root, output_root.resolve(strict=False)):
+                raise ValueError("prepared review output must not overlap source input")
+        cache_root = Path(getattr(self.cache, "root", self.config.paths.cache_dir)).absolute()
+        if _paths_overlap(cache_root.resolve(strict=False), output_root.resolve(strict=False)):
+            raise ValueError("prepared review cache must be separate from output")
+        _ensure_output_directory(output_root)
+        cache = self.cache or StageCache(self.config.paths.cache_dir)
+        outcomes = list(preparation.failures)
+        manifest = _safe_output_path(output_root, "manifest.jsonl")
+        manifest.unlink(missing_ok=True)
+        for outcome in preparation.failures:
+            append_manifest(manifest, outcome, source_type="unknown")
+        def review(item: MfaPrepared) -> UtteranceOutcome:
+            if item.state is None:
+                raise ValueError("prepared review requires a verified preparation state")
+            result = self._run_utterance(item.state.utterance, output_root,
+                                         ReadingOverrideSet({}), cache, resume=item.state)
+            assert isinstance(result, UtteranceOutcome)
+            return result
+
+        if self.review_workers == 1:
+            manager = nullcontext(None)
+        else:
+            manager = ProcessPoolExecutor(
+                max_workers=self.review_workers,
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=_initialize_review_worker, initargs=(self,),
+            )
+        with manager as pool:
+            reviewed = (map(review, preparation.items) if pool is None else
+                        pool.map(_review_worker, ((item, output_root, cache_root)
+                                                  for item in preparation.items), chunksize=1))
+            for item, outcome in zip(preparation.items, reviewed):
+                outcomes.append(outcome)
+                append_manifest(manifest, outcome, source_type="txt" if item.state.utterance.text_path else "asr")
+        summary = summarize(outcomes)
+        summary_path = _safe_output_path(output_root, "summary.json")
+        write_json(summary_path, summary)
+        return BatchResult(tuple(outcomes), manifest, summary_path, output_root, summary)
+
     def _run_utterance(
         self,
         utterance: Utterance,
         output_root: Path,
         override_set: ReadingOverrideSet,
         cache: StageCache,
-    ) -> UtteranceOutcome:
+        *, prepare_only: bool = False, frontend_only: bool = False,
+        resume: PreparationState | None = None,
+    ) -> UtteranceOutcome | MfaPrepared | MfaFrontend:
         started = time.monotonic()
         artifact_dir = _ensure_output_directory(output_root, utterance.utterance_id)
         final_grid = _safe_output_path(
@@ -687,244 +916,304 @@ class JapanMFAPipeline:
                 {"output_cleanup": time.monotonic() - started},
             )
         try:
-            audio, asr, frontend, accent, g2p, mfa, phone_map = self._defaults(artifact_dir)
+            audio, asr, frontend, accent, g2p, mfa, phone_map = self._defaults(artifact_dir, prepared=resume is not None)
 
-            stage_started = time.monotonic()
-            audio_fp = stage_fingerprint(
-                "audio",
-                {"audio": utterance.audio_path, "sample_rate": self.config.audio.sample_rate,
-                 "preprocess_revision": "asrmfa-trim-silence-v1",
-                 "preprocess": self.config.audio, "adapter": _adapter_id(audio)},
-            )
+            if resume is not None:
+                if (resume.utterance != utterance or resume.identity != _preparation_identity(self.config, self.alignment_mode)
+                        or any(not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest
+                               for path, digest in resume.files.items())):
+                    raise StageFailure("preparation", "prepared_source_changed", "prepared inputs changed before review")
+                audio_info, source, asr_result, frontend_payload, tokens, kana = (
+                    resume.values[name] for name in ("audio_info", "source", "asr_result", "frontend_payload", "tokens", "kana"))
+                old_artifact = resume.values["artifact_dir"]
+                if old_artifact != artifact_dir:
+                    for name in ("asr.json", "frontend.json", "mora.json"):
+                        if (old_artifact / name).is_file():
+                            shutil.copy2(old_artifact / name, artifact_dir / name)
+            else:
+                stage_started = time.monotonic()
+                audio_fp = stage_fingerprint(
+                    "audio",
+                    {"audio": utterance.audio_path, "sample_rate": self.config.audio.sample_rate,
+                     "preprocess_revision": "asrmfa-trim-silence-v1",
+                     "preprocess": self.config.audio, "adapter": _adapter_id(audio)},
+                )
 
-            def produce_audio(path: Path) -> dict[str, object]:
-                info = audio.prepare(utterance.audio_path, path / "audio.wav")
-                return {
-                    "duration": info.duration,
-                    "source_sample_rate": info.source_sample_rate,
-                    "source_channels": info.source_channels,
-                    "working_sample_rate": info.working_sample_rate,
-                    "source_frames": info.source_frames,
-                    "working_frames": info.working_frames,
-                    "source_sha256": info.source_sha256,
-                    "working_sha256": info.working_sha256,
-                }
+                def produce_audio(path: Path) -> dict[str, object]:
+                    info = audio.prepare(utterance.audio_path, path / "audio.wav")
+                    return {
+                        "duration": info.duration,
+                        "source_sample_rate": info.source_sample_rate,
+                        "source_channels": info.source_channels,
+                        "working_sample_rate": info.working_sample_rate,
+                        "source_frames": info.source_frames,
+                        "working_frames": info.working_frames,
+                        "source_sha256": info.source_sha256,
+                        "working_sha256": info.working_sha256,
+                    }
 
-            def validate_audio_cache(directory: Path) -> bool:
-                artifact = directory / "audio.wav"
-                if not _valid_working_audio(artifact, self.config.audio.sample_rate):
-                    return False
-                # StageCache validates the producer's temporary directory
-                # before writing result.json; metadata/hash validation applies
-                # to an already published cache entry.
-                if not (directory / "result.json").exists():
-                    return True
-                try:
-                    metadata = json.loads((directory / "result.json").read_text(encoding="utf-8"))
-                    source_hash = hashlib.sha256(utterance.audio_path.read_bytes()).hexdigest()
-                    working_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
-                    return (metadata.get("source_sha256") == source_hash
-                            and metadata.get("working_sha256") == working_hash)
-                except (OSError, ValueError, TypeError, json.JSONDecodeError):
-                    return False
+                def validate_audio_cache(directory: Path) -> bool:
+                    artifact = directory / "audio.wav"
+                    if not _valid_working_audio(artifact, self.config.audio.sample_rate):
+                        return False
+                    # StageCache validates the producer's temporary directory
+                    # before writing result.json; metadata/hash validation applies
+                    # to an already published cache entry.
+                    if not (directory / "result.json").exists():
+                        return True
+                    try:
+                        metadata = json.loads((directory / "result.json").read_text(encoding="utf-8"))
+                        source_hash = hashlib.sha256(utterance.audio_path.read_bytes()).hexdigest()
+                        working_hash = hashlib.sha256(artifact.read_bytes()).hexdigest()
+                        return (metadata.get("source_sha256") == source_hash
+                                and metadata.get("working_sha256") == working_hash)
+                    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                        return False
 
-            audio_meta = cache.load_or_run(
-                "audio",
-                audio_fp,
-                produce_audio,
-                validate=validate_audio_cache,
-            )
-            cached_audio = cache.directory("audio", audio_fp) / "audio.wav"
-            if not cached_audio.is_file():
-                raise StageFailure("audio", "cache_artifact_missing", "cached working audio is missing")
-            working_dir = _ensure_output_directory(artifact_dir, "work")
-            working_audio = _safe_output_path(working_dir, "audio.wav")
-            shutil.copy2(cached_audio, working_audio)
-            audio_info = AudioInfo(
-                utterance.audio_path,
-                working_audio,
-                float(audio_meta["duration"]),
-                int(audio_meta["source_sample_rate"]),
-                int(audio_meta["source_channels"]),
-                int(audio_meta["working_sample_rate"]),
-                int(audio_meta.get("source_frames", 0)),
-                int(audio_meta.get("working_frames", 0)),
-                str(audio_meta.get("source_sha256", "")),
-                str(audio_meta.get("working_sha256", "")),
-            )
-            durations["audio"] = time.monotonic() - stage_started
+                audio_meta = cache.load_or_run(
+                    "audio",
+                    audio_fp,
+                    produce_audio,
+                    validate=validate_audio_cache,
+                )
+                cached_audio = cache.directory("audio", audio_fp) / "audio.wav"
+                if not cached_audio.is_file():
+                    raise StageFailure("audio", "cache_artifact_missing", "cached working audio is missing")
+                working_dir = _ensure_output_directory(artifact_dir, "work")
+                working_audio = _safe_output_path(working_dir, "audio.wav")
+                shutil.copy2(cached_audio, working_audio)
+                audio_info = AudioInfo(
+                    utterance.audio_path,
+                    working_audio,
+                    float(audio_meta["duration"]),
+                    int(audio_meta["source_sample_rate"]),
+                    int(audio_meta["source_channels"]),
+                    int(audio_meta["working_sample_rate"]),
+                    int(audio_meta.get("source_frames", 0)),
+                    int(audio_meta.get("working_frames", 0)),
+                    str(audio_meta.get("source_sha256", "")),
+                    str(audio_meta.get("working_sha256", "")),
+                )
+                durations["audio"] = time.monotonic() - stage_started
 
-            current_stage = "source"
-            stage_started = time.monotonic()
-            source_fp = stage_fingerprint(
-                "source",
-                {
-                    "audio": utterance.audio_path,
-                    "text": utterance.text_path,
-                    "model": self.config.asr.model,
-                    "aligner_model": self.config.asr.aligner_model,
-                    "source_revision": "qwen-forced-align-timestamps-v1",
-                    "working_audio_sha256": audio_info.working_sha256,
-                    "adapter": _adapter_id(asr),
-                },
-            )
+                current_stage = "source"
+                stage_started = time.monotonic()
+                source_fp = stage_fingerprint(
+                    "source",
+                    {
+                        "audio": utterance.audio_path,
+                        "text": utterance.text_path,
+                        "model": self.config.asr.model,
+                        "aligner_model": self.config.asr.aligner_model,
+                        "source_revision": "qwen-forced-align-timestamps-v1",
+                        "working_audio_sha256": audio_info.working_sha256,
+                        "adapter": asr.cache_identity(utterance.utterance_id) if hasattr(asr, "cache_identity") else _adapter_id(asr),
+                    },
+                )
 
-            def produce_source(_path: Path) -> dict[str, object]:
-                asr_result: ASRResult | None = None
-                if utterance.text_path is not None:
-                    source = load_source_text(utterance.text_path)
-                    if asr is not None:
+                def produce_source(_path: Path) -> dict[str, object]:
+                    asr_result: ASRResult | None = None
+                    if utterance.text_path is not None:
+                        source = load_source_text(utterance.text_path)
+                        if asr is not None:
+                            try:
+                                asr_result = asr.transcribe([audio_info.working_path], reference_texts={audio_info.working_path: source.original}).get(audio_info.working_path)
+                            except StageFailure as exc:
+                                if exc.stage == "asr" and exc.reason_code == "non_japanese_language":
+                                    raise SkipUtterance("non_japanese_language", exc.message, exc.details) from exc
+                                raise
+                    else:
+                        if asr is None:
+                            raise StageFailure("asr", "unavailable", "ASR is required when .txt is missing")
                         try:
-                            asr_result = asr.transcribe([audio_info.working_path], reference_texts={audio_info.working_path: source.original}).get(audio_info.working_path)
+                            asr_result = asr.transcribe([audio_info.working_path]).get(audio_info.working_path)
                         except StageFailure as exc:
                             if exc.stage == "asr" and exc.reason_code == "non_japanese_language":
                                 raise SkipUtterance("non_japanese_language", exc.message, exc.details) from exc
                             raise
-                else:
-                    if asr is None:
-                        raise StageFailure("asr", "unavailable", "ASR is required when .txt is missing")
-                    try:
-                        asr_result = asr.transcribe([audio_info.working_path]).get(audio_info.working_path)
-                    except StageFailure as exc:
-                        if exc.stage == "asr" and exc.reason_code == "non_japanese_language":
-                            raise SkipUtterance("non_japanese_language", exc.message, exc.details) from exc
-                        raise
-                    if asr_result is None:
-                        raise StageFailure("asr", "result_coverage_mismatch", "ASR returned no result")
-                    source = _source_from_asr(asr_result.text)
-                if asr_result is not None and asr_result.language != "Japanese":
-                    raise SkipUtterance("unsupported_language", "ASR reported a non-Japanese language")
-                return {
-                    "original": source.original,
-                    "processing": source.processing,
-                    "source": source.source,
-                    "asr": None if asr_result is None else {
-                        "model": asr_result.model,
-                        "language": asr_result.language,
-                        "text": asr_result.text,
-                        "aligner_model": asr_result.aligner_model,
-                        "alignment_text": asr_result.alignment_text,
-                        "lexical_timestamps": [vars(item) for item in asr_result.lexical_timestamps],
-                        "punctuation_timestamps": [vars(item) for item in asr_result.punctuation_timestamps],
+                        if asr_result is None:
+                            raise StageFailure("asr", "result_coverage_mismatch", "ASR returned no result")
+                        source = _source_from_asr(asr_result.text)
+                    if asr_result is not None and asr_result.language != "Japanese":
+                        raise SkipUtterance("unsupported_language", "ASR reported a non-Japanese language")
+                    return {
+                        "original": source.original,
+                        "processing": source.processing,
+                        "source": source.source,
+                        "asr": None if asr_result is None else {
+                            "model": asr_result.model,
+                            "language": asr_result.language,
+                            "text": asr_result.text,
+                            "aligner_model": asr_result.aligner_model,
+                            "alignment_text": asr_result.alignment_text,
+                            "lexical_timestamps": [vars(item) for item in asr_result.lexical_timestamps],
+                            "punctuation_timestamps": [vars(item) for item in asr_result.punctuation_timestamps],
+                        },
+                    }
+
+                source_payload = cache.load_or_run("source", source_fp, produce_source)
+                source = SourceText(str(source_payload["original"]), str(source_payload["processing"]), str(source_payload["source"]))  # type: ignore[arg-type]
+                asr_payload = source_payload.get("asr")
+                asr_result = None if asr_payload is None else ASRResult(
+                    audio_info.working_path,
+                    str(asr_payload["language"]),
+                    str(asr_payload["text"]),
+                    str(asr_payload["model"]),
+                    asr_payload.get("aligner_model"),
+                    asr_payload.get("alignment_text"),
+                    tuple(Timestamp(**item) for item in asr_payload.get("lexical_timestamps", [])),
+                    tuple(Timestamp(**item) for item in asr_payload.get("punctuation_timestamps", [])),
+                )
+                durations["source"] = time.monotonic() - stage_started
+                write_json(
+                    _safe_output_path(artifact_dir, "asr.json"),
+                    {
+                        "model": None if asr_result is None else asr_result.model,
+                        "language": None if asr_result is None else asr_result.language,
+                        "text": None if asr_result is None else asr_result.text,
+                        "aligner_model": None if asr_result is None else asr_result.aligner_model,
+                        "alignment_text": None if asr_result is None else asr_result.alignment_text,
+                        "lexical_timestamps": [] if asr_result is None else [vars(item) for item in asr_result.lexical_timestamps],
+                        "punctuation_timestamps": [] if asr_result is None else [vars(item) for item in asr_result.punctuation_timestamps],
+                        "source": source.source,
+                        "authoritative_text": source.original,
+                        "validation": "not_run" if asr_result is None else "language_checked",
+                        "comparison": _asr_comparison(source, asr_result),
                     },
-                }
+                )
 
-            source_payload = cache.load_or_run("source", source_fp, produce_source)
-            source = SourceText(str(source_payload["original"]), str(source_payload["processing"]), str(source_payload["source"]))  # type: ignore[arg-type]
-            asr_payload = source_payload.get("asr")
-            asr_result = None if asr_payload is None else ASRResult(
-                audio_info.working_path,
-                str(asr_payload["language"]),
-                str(asr_payload["text"]),
-                str(asr_payload["model"]),
-                asr_payload.get("aligner_model"),
-                asr_payload.get("alignment_text"),
-                tuple(Timestamp(**item) for item in asr_payload.get("lexical_timestamps", [])),
-                tuple(Timestamp(**item) for item in asr_payload.get("punctuation_timestamps", [])),
-            )
-            durations["source"] = time.monotonic() - stage_started
-            write_json(
-                _safe_output_path(artifact_dir, "asr.json"),
-                {
-                    "model": None if asr_result is None else asr_result.model,
-                    "language": None if asr_result is None else asr_result.language,
-                    "text": None if asr_result is None else asr_result.text,
-                    "aligner_model": None if asr_result is None else asr_result.aligner_model,
-                    "alignment_text": None if asr_result is None else asr_result.alignment_text,
-                    "lexical_timestamps": [] if asr_result is None else [vars(item) for item in asr_result.lexical_timestamps],
-                    "punctuation_timestamps": [] if asr_result is None else [vars(item) for item in asr_result.punctuation_timestamps],
-                    "source": source.source,
-                    "authoritative_text": source.original,
-                    "validation": "not_run" if asr_result is None else "language_checked",
-                    "comparison": _asr_comparison(source, asr_result),
-                },
-            )
+                current_stage = "frontend"
+                stage_started = time.monotonic()
+                frontend_fp = stage_fingerprint(
+                    "frontend",
+                    {
+                        "utterance_id": utterance.utterance_id,
+                        "source": source_payload,
+                        "overrides": _adapter_id(override_set),
+                        "adapter": _adapter_id(frontend),
+                    },
+                )
 
-            current_stage = "frontend"
-            stage_started = time.monotonic()
-            frontend_fp = stage_fingerprint(
-                "frontend",
-                {
-                    "utterance_id": utterance.utterance_id,
-                    "source": source_payload,
-                    "overrides": _adapter_id(override_set),
-                    "adapter": _adapter_id(frontend),
-                },
-            )
+                def produce_frontend(_path: Path) -> dict[str, object]:
+                    tokens = frontend.analyze(source)
+                    tokens = apply_reading_overrides(utterance.utterance_id, source.original, tokens, override_set)
+                    return {"tokens": _token_payload(tokens), "kana": render_locked_kana(source.original, tokens)}
 
-            def produce_frontend(_path: Path) -> dict[str, object]:
-                tokens = frontend.analyze(source)
-                tokens = apply_reading_overrides(utterance.utterance_id, source.original, tokens, override_set)
-                return {"tokens": _token_payload(tokens), "kana": render_locked_kana(source.original, tokens)}
+                frontend_payload = cache.load_or_run("frontend", frontend_fp, produce_frontend)
+                tokens = _tokens_from_payload(frontend_payload["tokens"])
+                kana = str(frontend_payload["kana"])
+                durations["frontend"] = time.monotonic() - stage_started
+                write_json(_safe_output_path(artifact_dir, "frontend.json"), {"tokens": _token_payload(tokens), "original": source.original, "kana": kana})
 
-            frontend_payload = cache.load_or_run("frontend", frontend_fp, produce_frontend)
-            tokens = _tokens_from_payload(frontend_payload["tokens"])
-            kana = str(frontend_payload["kana"])
-            durations["frontend"] = time.monotonic() - stage_started
-            write_json(_safe_output_path(artifact_dir, "frontend.json"), {"tokens": _token_payload(tokens), "original": source.original, "kana": kana})
+            if frontend_only:
+                return MfaFrontend(utterance.utterance_id, tokens, frontend_payload,
+                                   _preparation_state("frontend", utterance, {
+                                       "audio_info": audio_info, "source": source, "asr_result": asr_result,
+                                       "frontend_payload": frontend_payload, "tokens": tokens, "kana": kana,
+                                       "artifact_dir": artifact_dir}, asr, self.config, self.alignment_mode))
 
-            current_stage = "accent"
-            stage_started = time.monotonic()
-            accent_fp = stage_fingerprint("accent", {"frontend": frontend_payload, "adapter": _adapter_id(accent)})
+            if resume is not None and resume.phase == "prepared":
+                toned_morae, lexicon, corpus_dir, corpus_audio, dictionary_path, segments, qwen_timed = (
+                    resume.values[name] for name in ("toned_morae", "lexicon", "corpus_dir", "corpus_audio",
+                                                    "dictionary_path", "segments", "qwen_timed"))
+                mfa_root = _ensure_output_directory(artifact_dir, "mfa")
+                mfa_output = _safe_output_path(mfa_root, "aligned")
+                mfa_work = _safe_output_path(mfa_root, "work")
+                stage_started = time.monotonic()
+            else:
+                current_stage = "accent"
+                stage_started = time.monotonic()
+                accent_fp = stage_fingerprint("accent", {"frontend": frontend_payload, "adapter": _adapter_id(accent)})
 
-            def produce_accent(_path: Path) -> dict[str, object]:
-                token_morae = {token.index: segment_morae(token) for token in tokens}
-                requests = tuple(AccentRequest(token.index, token.surface, token.reading) for token in tokens)
-                marked = accent.predict(requests)
-                toned_morae: dict[int, tuple[Mora, ...]] = {}
-                for token in tokens:
-                    if token.index not in marked:
-                        raise StageFailure("accent", "output_coverage_mismatch", "tdmelodic omitted a token", {"token_index": token.index})
-                    toned_morae[token.index] = parse_accent(marked[token.index], token_morae[token.index])
-                return {"morae": _mora_payload(toned_morae), "tdmelodic": marked}
+                def produce_accent(_path: Path) -> dict[str, object]:
+                    token_morae = {token.index: segment_morae(token) for token in tokens}
+                    requests = tuple(AccentRequest(token.index, token.surface, token.reading) for token in tokens)
+                    marked = accent.predict(requests)
+                    toned_morae: dict[int, tuple[Mora, ...]] = {}
+                    for token in tokens:
+                        if token.index not in marked:
+                            raise StageFailure("accent", "output_coverage_mismatch", "tdmelodic omitted a token", {"token_index": token.index})
+                        toned_morae[token.index] = parse_accent_or_untoned(marked[token.index], token_morae[token.index])
+                    unknown = {str(index): "malformed_output_exact_reading"
+                               for index, values in toned_morae.items()
+                               if any(value.tone is None for value in values)}
+                    return {"morae": _mora_payload(toned_morae), "tdmelodic": marked,
+                            **({"unknown_tone_indices": unknown} if unknown else {})}
 
-            accent_payload = cache.load_or_run("accent", accent_fp, produce_accent)
-            toned_morae = _morae_from_payload(accent_payload["morae"])
-            marked = dict(accent_payload["tdmelodic"])
-            durations["accent"] = time.monotonic() - stage_started
-            write_json(_safe_output_path(artifact_dir, "mora.json"), {"morae": _mora_payload(toned_morae), "tdmelodic": marked})
+                accent_payload = cache.load_or_run("accent", accent_fp, produce_accent)
+                toned_morae = _morae_from_payload(accent_payload["morae"])
+                marked = dict(accent_payload["tdmelodic"])
+                durations["accent"] = time.monotonic() - stage_started
+                write_json(_safe_output_path(artifact_dir, "mora.json"), {
+                    "morae": _mora_payload(toned_morae), "tdmelodic": marked,
+                    **({"unknown_tone_indices": accent_payload["unknown_tone_indices"]}
+                       if accent_payload.get("unknown_tone_indices") else {}),
+                })
 
-            current_stage = "g2p"
-            stage_started = time.monotonic()
-            g2p_fp = stage_fingerprint("g2p", {"tokens": _token_payload(tokens), "model": self.config.mfa.g2p_model, "adapter": _adapter_id(g2p)})
+                current_stage = "g2p"
+                stage_started = time.monotonic()
+                g2p_fp = stage_fingerprint("g2p", {"tokens": _token_payload(tokens), "model": self.config.mfa.g2p_model, "adapter": _adapter_id(g2p)})
 
-            def produce_g2p(path: Path) -> dict[str, object]:
-                pronunciations = g2p.pronounce(tuple(token.reading for token in tokens), path)
-                return {"pronunciations": [{"reading": item.reading, "phones": list(item.phones), "alternates": [list(variant) for variant in item.alternates]} for item in pronunciations]}
+                def produce_g2p(path: Path) -> dict[str, object]:
+                    pronunciations = g2p.pronounce(tuple(token.reading for token in tokens), path)
+                    return {"pronunciations": [{"reading": item.reading, "phones": list(item.phones), "alternates": [list(variant) for variant in item.alternates]} for item in pronunciations]}
 
-            g2p_payload = cache.load_or_run("g2p", g2p_fp, produce_g2p)
-            pronunciations = tuple(Pronunciation(str(item["reading"]), tuple(str(phone) for phone in item["phones"]), tuple(tuple(str(phone) for phone in variant) for variant in item.get("alternates", []))) for item in g2p_payload["pronunciations"])
-            pronunciations = filter_mappable_pronunciations(tokens, pronunciations, toned_morae, phone_map)
-            lexicon = LockedLexicon.build(utterance.utterance_id, tokens, pronunciations)
-            mfa_root = _ensure_output_directory(artifact_dir, "mfa")
-            corpus_dir = _ensure_output_directory(mfa_root, "corpus")
-            dictionary_path = _safe_output_path(mfa_root, "dictionary.dict")
-            _safe_output_path(corpus_dir, f"{utterance.utterance_id}.lab")
-            _safe_output_path(corpus_dir, "aliases.json")
-            lexicon.write(corpus_dir, dictionary_path)
-            corpus_audio = _safe_output_path(corpus_dir, f"{utterance.utterance_id}.wav")
-            corpus_audio.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(audio_info.working_path, corpus_audio)
-            durations["g2p"] = time.monotonic() - stage_started
+                g2p_payload = cache.load_or_run("g2p", g2p_fp, produce_g2p)
+                pronunciations = tuple(Pronunciation(str(item["reading"]), tuple(str(phone) for phone in item["phones"]), tuple(tuple(str(phone) for phone in variant) for variant in item.get("alternates", []))) for item in g2p_payload["pronunciations"])
+                pronunciations = filter_mappable_pronunciations(tokens, pronunciations, toned_morae, phone_map)
+                lexicon = LockedLexicon.build(utterance.utterance_id, tokens, pronunciations)
+                mfa_root = _ensure_output_directory(artifact_dir, "mfa")
+                corpus_dir = _ensure_output_directory(mfa_root, "corpus")
+                dictionary_path = _safe_output_path(mfa_root, "dictionary.dict")
+                _safe_output_path(corpus_dir, f"{utterance.utterance_id}.lab")
+                _safe_output_path(corpus_dir, "aliases.json")
+                lexicon.write(corpus_dir, dictionary_path)
+                corpus_audio = _safe_output_path(corpus_dir, f"{utterance.utterance_id}.wav")
+                corpus_audio.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(audio_info.working_path, corpus_audio)
+                durations["g2p"] = time.monotonic() - stage_started
 
-            current_stage = "mfa"
-            stage_started = time.monotonic()
-            mfa_output = _safe_output_path(mfa_root, "aligned")
-            mfa_work = _safe_output_path(mfa_root, "work")
-            _reject_symlink_components(mfa_output)
-            _reject_symlink_components(mfa_work)
-            working_duration = (
-                audio_info.working_frames / audio_info.working_sample_rate
-                if audio_info.working_frames and audio_info.working_sample_rate else audio_info.duration
-            )
-            qwen_timed = asr_result is not None and asr_result.aligner_model is not None
-            segments = (
-                plan_timed_segments(source.original, asr_result.lexical_timestamps, tokens, working_duration)
-                if qwen_timed else (TimedSegment(0.0, working_duration, 0, len(tokens)),)
-            )
-            if qwen_timed:
-                segments = expand_timed_segments_with_audio(segments, audio_info.working_path)
-            if not qwen_timed:
+                current_stage = "mfa"
+                stage_started = time.monotonic()
+                mfa_output = _safe_output_path(mfa_root, "aligned")
+                mfa_work = _safe_output_path(mfa_root, "work")
+                _reject_symlink_components(mfa_output)
+                _reject_symlink_components(mfa_work)
+                working_duration = (
+                    audio_info.working_frames / audio_info.working_sample_rate
+                    if audio_info.working_frames and audio_info.working_sample_rate else audio_info.duration
+                )
+                qwen_timed = asr_result is not None and asr_result.aligner_model is not None
+                segments = (
+                    plan_timed_segments(source.original, asr_result.lexical_timestamps, tokens, working_duration)
+                    if qwen_timed else (TimedSegment(0.0, working_duration, 0, len(tokens)),)
+                )
+                if qwen_timed:
+                    segments = expand_timed_segments_with_audio(segments, audio_info.working_path)
+            if prepare_only:
+                write_json(_safe_output_path(artifact_dir, "mfa.json"), {
+                    "alignment_mode": "prepared", "textgrid": None, "textgrids": [],
+                    "timestamp_segments": [
+                        {"start": segment.start, "end": segment.end,
+                         "anchor_start": segment.anchor_start, "anchor_end": segment.anchor_end,
+                         "acoustic_start_limit": segment.acoustic_start_limit,
+                         "acoustic_end_limit": segment.acoustic_end_limit,
+                         "aliases": list(lexicon.aliases[segment.first_token:segment.last_token])}
+                        for segment in segments
+                    ],
+                    "aliases": list(lexicon.aliases), "transcript": lexicon.transcript,
+                })
+                return MfaPrepared(utterance.utterance_id, artifact_dir, corpus_audio,
+                                   dictionary_path, audio_info.working_path,
+                                   tuple(lexicon.aliases), tuple(segments),
+                                   _preparation_state("prepared", utterance, {
+                                       "audio_info": audio_info, "source": source, "asr_result": asr_result,
+                                       "frontend_payload": frontend_payload, "tokens": tokens, "kana": kana,
+                                       "artifact_dir": artifact_dir, "toned_morae": toned_morae,
+                                       "lexicon": lexicon, "corpus_dir": corpus_dir, "corpus_audio": corpus_audio,
+                                       "dictionary_path": dictionary_path, "segments": segments,
+                                       "qwen_timed": qwen_timed}, asr, self.config, self.alignment_mode))
+            if not qwen_timed or self.alignment_mode == "whole":
                 raw_grid = Path(mfa.align(corpus_dir, dictionary_path, mfa_output, mfa_work))
                 alignment = parse_mfa_textgrid(raw_grid, frozenset(self.config.validation.silence_labels))
                 raw_grids = (raw_grid,)
@@ -937,6 +1226,7 @@ class JapanMFAPipeline:
                 )
             durations["mfa"] = time.monotonic() - stage_started
             write_json(_safe_output_path(artifact_dir, "mfa.json"), {
+                "alignment_mode": "whole" if not qwen_timed or self.alignment_mode == "whole" else "timed",
                 "textgrid": str(raw_grids[0]) if len(raw_grids) == 1 else None,
                 "textgrids": [str(path) for path in raw_grids],
                 "timestamp_segments": [
@@ -952,6 +1242,14 @@ class JapanMFAPipeline:
                 "aliases": list(lexicon.aliases), "transcript": lexicon.transcript,
             })
 
+            raw_alignment = alignment
+            fusion_report = None
+            if qwen_timed and self.alignment_mode == "whole":
+                alignment, fusion_report = fuse_word_boundaries(
+                    alignment, source.original, tokens,
+                    asr_result.lexical_timestamps, audio_info.working_path,
+                )
+
             current_stage = "projection"
             stage_started = time.monotonic()
             annotations = project_annotations(alignment, lexicon, toned_morae, phone_map)
@@ -965,9 +1263,14 @@ class JapanMFAPipeline:
                 mfa_alignment=alignment,
                 enable_word_in_silence_filter=self.config.validation.enable_word_in_silence_filter,
             )
+            if fusion_report is not None:
+                processed.report["ctc_word_fusion"] = fusion_report
+            # Wider acoustic context must not discard the original CTC checks.
+            review_segments = resume.values.get("review_segments", segments) if resume is not None else segments
             review_processed_timing(
-                processed.report, segments, alignment, processed.annotations,
+                processed.report, review_segments, alignment, processed.annotations,
                 tuple(token.index for token in tokens), audio_info.working_path,
+                raw_alignment=raw_alignment,
             )
             write_json(_safe_output_path(artifact_dir, "postprocess.json"), processed.report)
             durations["postprocess"] = time.monotonic() - stage_started
@@ -1141,4 +1444,4 @@ class JapanMFAPipeline:
             )
 
 
-__all__ = ["BatchResult", "JapanMFAPipeline"]
+__all__ = ["BatchResult", "JapanMFAPipeline", "MfaPrepared", "MfaPreparationBatch"]

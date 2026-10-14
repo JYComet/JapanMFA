@@ -144,3 +144,19 @@ def parse_accent(
         pitch = "L"
 
     return tuple(replace(mora, tone=tone) for mora, tone in zip(locked_morae, tones))
+
+
+def parse_accent_or_untoned(
+    marked_yomi: str, locked_morae: tuple[Mora, ...]
+) -> tuple[Mora, ...]:
+    """Keep an intact reading alignable when only its pitch markers conflict."""
+    try:
+        return parse_accent(marked_yomi, locked_morae)
+    except StageFailure as exc:
+        if exc.reason_code != "malformed_output" or not isinstance(marked_yomi, str):
+            raise
+        reading = _canonical_katakana(marked_yomi).replace("[", "").replace("]", "")
+        expected = "".join(_canonical_katakana(mora.kana) for mora in locked_morae)
+        if not expected or reading != expected:
+            raise
+        return tuple(replace(mora, tone=None) for mora in locked_morae)

@@ -42,6 +42,29 @@ def _morae(*items: tuple[str, str]) -> tuple[Mora, ...]:
     return tuple(Mora(0, index, kana, tone) for index, (kana, tone) in enumerate(items))
 
 
+@pytest.mark.parametrize(
+    ("reading", "kana", "phones"),
+    (
+        ("ヤキュウ", ("ヤ", "キュ", "ウ"), ("j", "a", "c", "ɨ", "ɯ")),
+        ("ケッコン", ("ケ", "ッ", "コ", "ン"), ("k", "e", "kː", "o", "ɴ")),
+        ("チョウテイ", ("チョ", "ウ", "テ", "イ"), ("tɕ", "o", "ɯ", "t", "e", "i")),
+        ("リュウコウ", ("リュ", "ウ", "コ", "ウ"), ("ɾʲ", "ɨː", "k", "o", "ɯ")),
+        ("ゼンシン", ("ゼ", "ン", "シ", "ン"), ("z", "e", "ɰ̃", "ɕ", "i", "ɴ")),
+    ),
+)
+def test_galgame_observed_g2p_candidates_cover_locked_morae(
+    reading: str, kana: tuple[str, ...], phones: tuple[str, ...]
+) -> None:
+    from japanmfa.projection import filter_mappable_pronunciations
+
+    token = Token(0, 0, len(reading), reading, ("名詞",), reading, "override")
+    selected = filter_mappable_pronunciations(
+        (token,), (Pronunciation(reading, phones),),
+        {0: _morae(*((item, "H") for item in kana))}, PHONE_MAP,
+    )
+    assert selected[0].phones == phones
+
+
 def test_projection_repeats_one_mora_label_for_multiple_cv_phones() -> None:
     lexicon = _lexicon("カ", ("k", "a"))
     alignment = _alignment((("k", 0.0, 0.2, False), ("a", 0.2, 0.4, False)))
@@ -220,9 +243,13 @@ def test_projection_rejects_mora_order_that_does_not_reconstruct_locked_reading(
     assert exc_info.value.reason_code == "mora_reading_mismatch"
 
 
-def test_labels_for_phone_rejects_unlabeled_mora() -> None:
+def test_labels_for_phone_marks_an_all_unknown_group_without_guessing() -> None:
+    assert labels_for_phone((Mora(0, 0, "ア", None),)) == ("ア", "??")
+
+
+def test_labels_for_phone_rejects_mixed_known_and_unknown_group() -> None:
     with pytest.raises(StageFailure) as exc_info:
-        labels_for_phone((Mora(0, 0, "ア", None),))
+        labels_for_phone((Mora(0, 0, "オ", "H"), Mora(0, 1, "ー", None)))
     assert exc_info.value.reason_code == "unlabeled_phone"
 
 

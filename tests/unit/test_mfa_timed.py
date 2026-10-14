@@ -231,6 +231,46 @@ def test_qwen_crop_padding_stops_before_a_separate_sound(tmp_path: Path) -> None
     assert expanded[0].end <= 1.03
 
 
+def test_qwen_crop_retains_quiet_confirmed_tail_when_anchor_energy_is_below_speech_floor(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "weak-at-anchor.wav"
+    _write_profile_wav(audio, ((.50, 1.00, 8000), (1.00, 1.10, 600)), 1.6)
+    segment = TimedSegment(.50, 1.00, 0, 1, .50, 1.00)
+
+    expanded = timed.expand_timed_segments_with_audio((segment,), audio)[0]
+
+    assert expanded.anchor_end == 1.00
+    assert expanded.acoustic_end_limit == pytest.approx(1.10, abs=.01)
+    assert expanded.end >= 1.20
+
+
+def test_qwen_crop_weak_tail_does_not_cross_quiet_to_detached_sound(tmp_path: Path) -> None:
+    audio = tmp_path / "weak-then-island.wav"
+    _write_profile_wav(
+        audio, ((.50, 1.00, 8000), (1.00, 1.10, 600), (1.20, 1.36, 8000)), 1.6,
+    )
+    segment = TimedSegment(.50, 1.00, 0, 1, .50, 1.00)
+
+    expanded = timed.expand_timed_segments_with_audio((segment,), audio)[0]
+
+    assert expanded.acoustic_end_limit == pytest.approx(1.10, abs=.01)
+    assert expanded.end <= 1.20  # end is exclusive when the crop is written
+
+
+def test_qwen_crop_keeps_one_active_frame_after_ctc_end_for_quiet_confirmation(
+    tmp_path: Path,
+) -> None:
+    audio = tmp_path / "one-frame-tail.wav"
+    _write_profile_wav(audio, ((.50, 1.00, 8000), (1.00, 1.01, 600)), 1.6)
+    segment = TimedSegment(.50, 1.00, 0, 1, .50, 1.00)
+
+    expanded = timed.expand_timed_segments_with_audio((segment,), audio)[0]
+
+    assert expanded.acoustic_end_limit == pytest.approx(1.01, abs=.01)
+    assert expanded.end >= 1.10
+
+
 def test_padding_does_not_make_unsupported_qwen_drift_acceptable() -> None:
     segments = (TimedSegment(.5, 1.12, 0, 1, .5, .8, None, 1.0),)
     alignment = MfaAlignment((MfaWord("jmfa_000000", .5, 1.04),), (), ())

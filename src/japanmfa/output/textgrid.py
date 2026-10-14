@@ -283,8 +283,8 @@ def validate_five_tier_textgrid(
                 raise _error(f"silence labels are not canonical at interval {index + 1}")
         elif not phone.label or not kana_interval.label or not tone_interval.label:
             raise _error(f"non-silence labels are incomplete at interval {index + 1}")
-        elif tone_interval.label not in {"HH", "LL", "HL", "LH"}:
-            raise _error(f"non-silence tone must be HH, LL, HL or LH at interval {index + 1}")
+        elif tone_interval.label not in {"HH", "LL", "HL", "LH", "??"}:
+            raise _error(f"non-silence tone must be HH, LL, HL, LH or ?? at interval {index + 1}")
 
     def is_pause(label: str) -> bool:
         return not label or label in silence_labels or bool(_source_punctuation(label))
@@ -638,8 +638,13 @@ def write_five_tier_textgrid(
             if not interval.label or not annotation.kana_label or not annotation.tone_label:
                 raise ValueError("non-silence annotations require non-empty labels")
             phone_kana, phone_tone = annotation.kana_label, annotation.tone_label
-            if phone_tone not in {"HH", "LL", "HL", "LH"}:
-                raise ValueError("non-silence tone must be HH, LL, HL or LH")
+            unknown_morae = tuple(mora.tone is None for mora in annotation.morae)
+            if any(unknown_morae) and (not all(unknown_morae) or phone_tone != "??"):
+                raise ValueError("unknown tone morae require ??")
+            if phone_tone == "??" and (not unknown_morae or not all(unknown_morae)):
+                raise ValueError("unknown tone label requires untoned morae")
+            if phone_tone not in {"HH", "LL", "HL", "LH", "??"}:
+                raise ValueError("non-silence tone must be HH, LL, HL, LH or ??")
         phone_rows.append((start_text, end_text, interval.label, phone_kana, phone_tone))
 
     # All three phone tiers are projected from this one immutable row list.

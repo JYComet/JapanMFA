@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import re
 import unicodedata
+from dataclasses import replace
 from typing import Any
 
 from japanmfa.domain import SourceText, Token
@@ -13,6 +14,9 @@ from japanmfa.errors import SkipUtterance, StageFailure
 
 _KATAKANA_RE = re.compile(r"[ァ-ヿー]+")
 _ASCII_LATIN_RE = re.compile(r"[A-Za-z]")
+_YOON_STEMS = frozenset("キシチニヒミリギジヂビピ")
+_FOREIGN_YU_STEMS = frozenset("デフ")
+_SMALL_YOON = frozenset("ゃゅょャュョ")
 
 
 def normalize_katakana(value: str) -> str:
@@ -84,6 +88,31 @@ def _skip(message: str, **details: object) -> SkipUtterance:
     return SkipUtterance(
         "unsupported_japanese_text", f"unsupported_japanese_text: {message}", details
     )
+
+
+def _join_split_yoon(tokens: list[Token]) -> tuple[Token, ...]:
+    """Rejoin kana that Sudachi split inside one pronounced yoon syllable."""
+    joined: list[Token] = []
+    joined_yoon = False
+    for token in tokens:
+        previous = joined[-1] if joined else None
+        adjacent = previous is not None and previous.end == token.start
+        is_yoon = (adjacent and token.surface in _SMALL_YOON
+                   and token.reading == normalize_katakana(token.surface)
+                   and (previous.reading[-1] in _YOON_STEMS
+                        or token.reading == "ュ" and previous.reading[-1] in _FOREIGN_YU_STEMS)
+                   and ("ぁ" <= previous.surface[-1] <= "ゖ"
+                        or "ァ" <= previous.surface[-1] <= "ヿ"))
+        is_long_mark = adjacent and joined_yoon and token.surface == token.reading == "ー"
+        if is_yoon or is_long_mark:
+            joined[-1] = replace(previous, end=token.end,
+                                 surface=previous.surface + token.surface,
+                                 reading=previous.reading + token.reading)
+            joined_yoon = True
+        else:
+            joined.append(token)
+            joined_yoon = False
+    return tuple(replace(token, index=index) for index, token in enumerate(joined))
 
 
 class JapaneseFrontend:
@@ -180,7 +209,7 @@ class JapaneseFrontend:
                     {"surface": surface, "error": str(exc)},
                 ) from exc
 
-            if _is_punctuation(surface):
+            if surface.isspace() or _is_punctuation(surface):
                 continue
             if _is_symbol(surface):
                 raise _skip(
@@ -225,7 +254,7 @@ class JapaneseFrontend:
             )
         if not tokens:
             raise _skip("text contains no pronounced Japanese morphemes", text=processing)
-        return tuple(tokens)
+        return _join_split_yoon(tokens)
 
 
 def render_locked_kana(original: str, tokens: tuple[Token, ...]) -> str:

@@ -17,6 +17,7 @@ def review_processed_timing(
     report: dict[str, object], segments: Sequence[TimedSegment],
     alignment: MfaAlignment, annotations: Sequence[PhoneAnnotation],
     token_indices: Sequence[int], working_audio: Path,
+    *, raw_alignment: MfaAlignment | None = None,
 ) -> None:
     """Keep raw disagreements; gate the geometry actually being published.
 
@@ -26,7 +27,8 @@ def review_processed_timing(
     Acoustic failures already present in the report are never cleared here.
     """
     report['raw_timestamp_alignment'] = {
-        'max_drift_seconds': .2, 'issues': audit_timed_alignment(segments, alignment),
+        'max_drift_seconds': .2,
+        'issues': audit_timed_alignment(segments, raw_alignment or alignment),
     }
     if len(token_indices) != len(alignment.words):
         raise ValueError('timing review requires one final owner per MFA word')

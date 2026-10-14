@@ -1,0 +1,1456 @@
+{
+  "model_sha256": "85928ffb1024486872a677a92e1fa94d2f997462d0b84c73a58aa9bb0e35179a",
+  "dictionary_sha256": "4a0c66760576e4b7f3748f3169e7d5217c0135f857f0b5d34637c93a85fd1c91",
+  "model_phones": [
+    "a",
+    "aː",
+    "b",
+    "bʲ",
+    "bʲː",
+    "bː",
+    "c",
+    "cː",
+    "d",
+    "dz",
+    "dzː",
+    "dʑ",
+    "dʑː",
+    "dʲ",
+    "dʲː",
+    "dː",
+    "e",
+    "eː",
+    "h",
+    "hː",
+    "i",
+    "iː",
+    "i̥",
+    "j",
+    "k",
+    "kː",
+    "m",
+    "mʲ",
+    "mʲː",
+    "mː",
+    "n",
+    "nː",
+    "o",
+    "oː",
+    "p",
+    "pʲ",
+    "pʲː",
+    "pː",
+    "s",
+    "sː",
+    "t",
+    "ts",
+    "tsː",
+    "tɕ",
+    "tɕː",
+    "tʲ",
+    "tʲː",
+    "tː",
+    "v",
+    "vʲ",
+    "w",
+    "wː",
+    "z",
+    "ç",
+    "çː",
+    "ŋ",
+    "ɕ",
+    "ɕː",
+    "ɟ",
+    "ɟː",
+    "ɡ",
+    "ɡː",
+    "ɨ",
+    "ɨː",
+    "ɨ̥",
+    "ɯ",
+    "ɯː",
+    "ɯ̥",
+    "ɰ̃",
+    "ɲ",
+    "ɲː",
+    "ɴ",
+    "ɴː",
+    "ɸ",
+    "ɸʲ",
+    "ɸʲː",
+    "ɸː",
+    "ɾ",
+    "ɾʲ",
+    "ɾʲː",
+    "ɾː",
+    "ʑ",
+    "ʔ"
+  ],
+  "non_speech_symbols": {
+    "<eps>": 0,
+    "sil": 1,
+    "spn": 2
+  },
+  "cases": [
+    {
+      "phone": "a",
+      "reading": "ア",
+      "phones": [
+        "a"
+      ],
+      "dictionary_word": "ア"
+    },
+    {
+      "phone": "aː",
+      "reading": "アー",
+      "phones": [
+        "aː"
+      ],
+      "dictionary_word": "アー"
+    },
+    {
+      "phone": "b",
+      "reading": "バ",
+      "phones": [
+        "b",
+        "a"
+      ],
+      "dictionary_word": "バ"
+    },
+    {
+      "phone": "bʲ",
+      "reading": "ビ",
+      "phones": [
+        "bʲ",
+        "i"
+      ],
+      "dictionary_word": "ビ"
+    },
+    {
+      "phone": "bʲː",
+      "reading": "ネッビオーロ",
+      "phones": [
+        "n",
+        "e",
+        "bʲː",
+        "i",
+        "oː",
+        "ɾ",
+        "o"
+      ],
+      "dictionary_word": "ネッビオーロ"
+    },
+    {
+      "phone": "bː",
+      "reading": "クッバ",
+      "phones": [
+        "k",
+        "ɯ",
+        "bː",
+        "a"
+      ],
+      "dictionary_word": "クッバ"
+    },
+    {
+      "phone": "c",
+      "reading": "キ",
+      "phones": [
+        "c",
+        "i"
+      ],
+      "dictionary_word": "キ"
+    },
+    {
+      "phone": "cː",
+      "reading": "アッキ",
+      "phones": [
+        "a",
+        "cː",
+        "i"
+      ],
+      "dictionary_word": "あっき"
+    },
+    {
+      "phone": "d",
+      "reading": "ダ",
+      "phones": [
+        "d",
+        "a"
+      ],
+      "dictionary_word": "ダ"
+    },
+    {
+      "phone": "dz",
+      "reading": "ザ",
+      "phones": [
+        "dz",
+        "a"
+      ],
+      "dictionary_word": "ザ"
+    },
+    {
+      "phone": "dzː",
+      "reading": "ウッズ",
+      "phones": [
+        "ɯ",
+        "dzː",
+        "ɨ"
+      ],
+      "dictionary_word": "ウッズ"
+    },
+    {
+      "phone": "dʑ",
+      "reading": "ジ",
+      "phones": [
+        "dʑ",
+        "i"
+      ],
+      "dictionary_word": "ジ"
+    },
+    {
+      "phone": "dʑː",
+      "reading": "エッジ",
+      "phones": [
+        "e",
+        "dʑː",
+        "i"
+      ],
+      "dictionary_word": "エッジ"
+    },
+    {
+      "phone": "dʲ",
+      "reading": "ディ",
+      "phones": [
+        "dʲ",
+        "i"
+      ],
+      "dictionary_word": "ディ"
+    },
+    {
+      "phone": "dʲː",
+      "reading": "ウッディ",
+      "phones": [
+        "ɯ",
+        "dʲː",
+        "i"
+      ],
+      "dictionary_word": "ウッディ"
+    },
+    {
+      "phone": "dː",
+      "reading": "ウッド",
+      "phones": [
+        "ɯ",
+        "dː",
+        "o"
+      ],
+      "dictionary_word": "ウッド"
+    },
+    {
+      "phone": "e",
+      "reading": "エ",
+      "phones": [
+        "e"
+      ],
+      "dictionary_word": "エ"
+    },
+    {
+      "phone": "eː",
+      "reading": "エー",
+      "phones": [
+        "eː"
+      ],
+      "dictionary_word": "エー"
+    },
+    {
+      "phone": "h",
+      "reading": "ハ",
+      "phones": [
+        "h",
+        "a"
+      ],
+      "dictionary_word": "ハ"
+    },
+    {
+      "phone": "hː",
+      "reading": "アッハ",
+      "phones": [
+        "a",
+        "hː",
+        "a"
+      ],
+      "dictionary_word": "アッハ"
+    },
+    {
+      "phone": "i",
+      "reading": "イ",
+      "phones": [
+        "i"
+      ],
+      "dictionary_word": "イ"
+    },
+    {
+      "phone": "iː",
+      "reading": "イイ",
+      "phones": [
+        "iː"
+      ],
+      "dictionary_word": "イイ"
+    },
+    {
+      "phone": "i̥",
+      "reading": "シ",
+      "phones": [
+        "ɕ",
+        "i̥"
+      ],
+      "dictionary_word": "し"
+    },
+    {
+      "phone": "j",
+      "reading": "ヤ",
+      "phones": [
+        "j",
+        "a"
+      ],
+      "dictionary_word": "ヤ"
+    },
+    {
+      "phone": "k",
+      "reading": "カ",
+      "phones": [
+        "k",
+        "a"
+      ],
+      "dictionary_word": "カ"
+    },
+    {
+      "phone": "kː",
+      "reading": "ッカ",
+      "phones": [
+        "kː",
+        "a"
+      ],
+      "dictionary_word": "っか"
+    },
+    {
+      "phone": "m",
+      "reading": "マ",
+      "phones": [
+        "m",
+        "a"
+      ],
+      "dictionary_word": "マ"
+    },
+    {
+      "phone": "mʲ",
+      "reading": "ミ",
+      "phones": [
+        "mʲ",
+        "i"
+      ],
+      "dictionary_word": "ミ"
+    },
+    {
+      "phone": "mʲː",
+      "reading": "エンミ",
+      "phones": [
+        "e",
+        "mʲː",
+        "i"
+      ],
+      "dictionary_word": "えんみ"
+    },
+    {
+      "phone": "mː",
+      "reading": "アンマ",
+      "phones": [
+        "a",
+        "mː",
+        "a"
+      ],
+      "dictionary_word": "あんま"
+    },
+    {
+      "phone": "n",
+      "reading": "ナ",
+      "phones": [
+        "n",
+        "a"
+      ],
+      "dictionary_word": "ナ"
+    },
+    {
+      "phone": "nː",
+      "reading": "ンナ",
+      "phones": [
+        "nː",
+        "a"
+      ],
+      "dictionary_word": "ンな"
+    },
+    {
+      "phone": "o",
+      "reading": "オ",
+      "phones": [
+        "o"
+      ],
+      "dictionary_word": "オ"
+    },
+    {
+      "phone": "oː",
+      "reading": "オオ",
+      "phones": [
+        "oː"
+      ],
+      "dictionary_word": "オオ"
+    },
+    {
+      "phone": "p",
+      "reading": "パ",
+      "phones": [
+        "p",
+        "a"
+      ],
+      "dictionary_word": "パ"
+    },
+    {
+      "phone": "pʲ",
+      "reading": "ピ",
+      "phones": [
+        "pʲ",
+        "i"
+      ],
+      "dictionary_word": "ピ"
+    },
+    {
+      "phone": "pʲː",
+      "reading": "イッピ",
+      "phones": [
+        "i",
+        "pʲː",
+        "i"
+      ],
+      "dictionary_word": "いっぴ"
+    },
+    {
+      "phone": "pː",
+      "reading": "ッパ",
+      "phones": [
+        "pː",
+        "a"
+      ],
+      "dictionary_word": "っぱ"
+    },
+    {
+      "phone": "s",
+      "reading": "サ",
+      "phones": [
+        "s",
+        "a"
+      ],
+      "dictionary_word": "サ"
+    },
+    {
+      "phone": "sː",
+      "reading": "ッス",
+      "phones": [
+        "sː",
+        "ɨ"
+      ],
+      "dictionary_word": "ッス"
+    },
+    {
+      "phone": "t",
+      "reading": "タ",
+      "phones": [
+        "t",
+        "a"
+      ],
+      "dictionary_word": "タ"
+    },
+    {
+      "phone": "ts",
+      "reading": "ツ",
+      "phones": [
+        "ts",
+        "ɨ"
+      ],
+      "dictionary_word": "ツ"
+    },
+    {
+      "phone": "tsː",
+      "reading": "ッツ",
+      "phones": [
+        "tsː",
+        "ɨ"
+      ],
+      "dictionary_word": "っつ"
+    },
+    {
+      "phone": "tɕ",
+      "reading": "チ",
+      "phones": [
+        "tɕ",
+        "i"
+      ],
+      "dictionary_word": "チ"
+    },
+    {
+      "phone": "tɕː",
+      "reading": "ッチ",
+      "phones": [
+        "tɕː",
+        "i"
+      ],
+      "dictionary_word": "っち"
+    },
+    {
+      "phone": "tʲ",
+      "reading": "ティ",
+      "phones": [
+        "tʲ",
+        "i"
+      ],
+      "dictionary_word": "ティ"
+    },
+    {
+      "phone": "tʲː",
+      "reading": "ユッティ",
+      "phones": [
+        "j",
+        "ɨ",
+        "tʲː",
+        "i"
+      ],
+      "dictionary_word": "ゆってぃ"
+    },
+    {
+      "phone": "tː",
+      "reading": "ッタ",
+      "phones": [
+        "tː",
+        "a"
+      ],
+      "dictionary_word": "った"
+    },
+    {
+      "phone": "v",
+      "reading": "イヴ",
+      "phones": [
+        "i",
+        "v",
+        "ɯ"
+      ],
+      "dictionary_word": "イヴ"
+    },
+    {
+      "phone": "vʲ",
+      "reading": "ヴィ",
+      "phones": [
+        "vʲ",
+        "i"
+      ],
+      "dictionary_word": "ヴィ"
+    },
+    {
+      "phone": "w",
+      "reading": "ワ",
+      "phones": [
+        "w",
+        "a"
+      ],
+      "dictionary_word": "ワ"
+    },
+    {
+      "phone": "wː",
+      "reading": "カッワーリー",
+      "phones": [
+        "k",
+        "a",
+        "wː",
+        "aː",
+        "ɾʲ",
+        "iː"
+      ],
+      "dictionary_word": "カッワーリー"
+    },
+    {
+      "phone": "z",
+      "reading": "アザ",
+      "phones": [
+        "a",
+        "z",
+        "a"
+      ],
+      "dictionary_word": "アザ"
+    },
+    {
+      "phone": "ç",
+      "reading": "ヒ",
+      "phones": [
+        "ç",
+        "i"
+      ],
+      "dictionary_word": "ヒ"
+    },
+    {
+      "phone": "çː",
+      "reading": "イッヒ",
+      "phones": [
+        "i",
+        "çː",
+        "i"
+      ],
+      "dictionary_word": "イッヒ"
+    },
+    {
+      "phone": "ŋ",
+      "reading": "ンゴ",
+      "phones": [
+        "ŋ",
+        "ɡ",
+        "o"
+      ],
+      "dictionary_word": "ンゴ"
+    },
+    {
+      "phone": "ɕ",
+      "reading": "シ",
+      "phones": [
+        "ɕ",
+        "i"
+      ],
+      "dictionary_word": "シ"
+    },
+    {
+      "phone": "ɕː",
+      "reading": "ッシ",
+      "phones": [
+        "ɕː",
+        "i"
+      ],
+      "dictionary_word": "っし"
+    },
+    {
+      "phone": "ɟ",
+      "reading": "ギ",
+      "phones": [
+        "ɟ",
+        "i"
+      ],
+      "dictionary_word": "ギ"
+    },
+    {
+      "phone": "ɟː",
+      "reading": "スッギョ",
+      "phones": [
+        "s",
+        "ɨ",
+        "ɟː",
+        "o"
+      ],
+      "dictionary_word": "すっギョ"
+    },
+    {
+      "phone": "ɡ",
+      "reading": "ガ",
+      "phones": [
+        "ɡ",
+        "a"
+      ],
+      "dictionary_word": "ガ"
+    },
+    {
+      "phone": "ɡː",
+      "reading": "エッグ",
+      "phones": [
+        "e",
+        "ɡː",
+        "ɯ"
+      ],
+      "dictionary_word": "エッグ"
+    },
+    {
+      "phone": "ɨ",
+      "reading": "ス",
+      "phones": [
+        "s",
+        "ɨ"
+      ],
+      "dictionary_word": "ス"
+    },
+    {
+      "phone": "ɨː",
+      "reading": "スー",
+      "phones": [
+        "s",
+        "ɨː"
+      ],
+      "dictionary_word": "スー"
+    },
+    {
+      "phone": "ɨ̥",
+      "reading": "ス",
+      "phones": [
+        "s",
+        "ɨ̥"
+      ],
+      "dictionary_word": "ス"
+    },
+    {
+      "phone": "ɯ",
+      "reading": "ウ",
+      "phones": [
+        "ɯ"
+      ],
+      "dictionary_word": "ウ"
+    },
+    {
+      "phone": "ɯː",
+      "reading": "ウー",
+      "phones": [
+        "ɯː"
+      ],
+      "dictionary_word": "ウー"
+    },
+    {
+      "phone": "ɯ̥",
+      "reading": "アク",
+      "phones": [
+        "a",
+        "k",
+        "ɯ̥"
+      ],
+      "dictionary_word": "アク"
+    },
+    {
+      "phone": "ɰ̃",
+      "reading": "アンイ",
+      "phones": [
+        "a",
+        "ɰ̃",
+        "i"
+      ],
+      "dictionary_word": "あんい"
+    },
+    {
+      "phone": "ɲ",
+      "reading": "ニ",
+      "phones": [
+        "ɲ",
+        "i"
+      ],
+      "dictionary_word": "ニ"
+    },
+    {
+      "phone": "ɲː",
+      "reading": "アンニ",
+      "phones": [
+        "a",
+        "ɲː",
+        "i"
+      ],
+      "dictionary_word": "あんに"
+    },
+    {
+      "phone": "ɴ",
+      "reading": "ン",
+      "phones": [
+        "ɴ"
+      ],
+      "dictionary_word": "ン"
+    },
+    {
+      "phone": "ɴː",
+      "reading": "ン",
+      "phones": [
+        "ɴː"
+      ],
+      "dictionary_word": "ん"
+    },
+    {
+      "phone": "ɸ",
+      "reading": "フ",
+      "phones": [
+        "ɸ",
+        "ɯ"
+      ],
+      "dictionary_word": "フ"
+    },
+    {
+      "phone": "ɸʲ",
+      "reading": "アフィ",
+      "phones": [
+        "a",
+        "ɸʲ",
+        "i"
+      ],
+      "dictionary_word": "アフィ"
+    },
+    {
+      "phone": "ɸʲː",
+      "reading": "ダッフィ",
+      "phones": [
+        "d",
+        "a",
+        "ɸʲː",
+        "i"
+      ],
+      "dictionary_word": "ダッフィ"
+    },
+    {
+      "phone": "ɸː",
+      "reading": "バッフ",
+      "phones": [
+        "b",
+        "a",
+        "ɸː",
+        "ɯ"
+      ],
+      "dictionary_word": "バッフ"
+    },
+    {
+      "phone": "ɾ",
+      "reading": "ラ",
+      "phones": [
+        "ɾ",
+        "a"
+      ],
+      "dictionary_word": "ラ"
+    },
+    {
+      "phone": "ɾʲ",
+      "reading": "リ",
+      "phones": [
+        "ɾʲ",
+        "i"
+      ],
+      "dictionary_word": "リ"
+    },
+    {
+      "phone": "ɾʲː",
+      "reading": "チッリ",
+      "phones": [
+        "tɕ",
+        "i",
+        "ɾʲː",
+        "i"
+      ],
+      "dictionary_word": "チッリ"
+    },
+    {
+      "phone": "ɾː",
+      "reading": "アッラー",
+      "phones": [
+        "a",
+        "ɾː",
+        "aː"
+      ],
+      "dictionary_word": "アッラー"
+    },
+    {
+      "phone": "ʑ",
+      "reading": "アジ",
+      "phones": [
+        "a",
+        "ʑ",
+        "i"
+      ],
+      "dictionary_word": "アジ"
+    },
+    {
+      "phone": "ʔ",
+      "reading": "ッ",
+      "phones": [
+        "ʔ"
+      ],
+      "dictionary_word": "っ"
+    }
+  ],
+  "new_rule_word_cases": [
+    {
+      "kana": [
+        "キ"
+      ],
+      "phones": [
+        "c",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "キシ",
+        "reading": "キシ",
+        "phones": [
+          "c",
+          "i̥",
+          "ɕ",
+          "i"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ク"
+      ],
+      "phones": [
+        "k",
+        "ɯ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "アク",
+        "reading": "アク",
+        "phones": [
+          "a",
+          "k",
+          "ɯ̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "シ"
+      ],
+      "phones": [
+        "ɕ",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "し",
+        "reading": "シ",
+        "phones": [
+          "ɕ",
+          "i̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ス"
+      ],
+      "phones": [
+        "s",
+        "ɨ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "ス",
+        "reading": "ス",
+        "phones": [
+          "s",
+          "ɨ̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "チ"
+      ],
+      "phones": [
+        "tɕ",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "がち",
+        "reading": "ガチ",
+        "phones": [
+          "ɡ",
+          "a",
+          "tɕ",
+          "i̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ッ",
+        "キ"
+      ],
+      "phones": [
+        "cː",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "チョッキ",
+        "reading": "チョッキ",
+        "phones": [
+          "tɕ",
+          "o",
+          "cː",
+          "i̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ッ",
+        "ク"
+      ],
+      "phones": [
+        "kː",
+        "ɯ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "ドック",
+        "reading": "ドック",
+        "phones": [
+          "d",
+          "o",
+          "kː",
+          "ɯ̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ッ",
+        "シュ"
+      ],
+      "phones": [
+        "ɕː",
+        "ɨ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "バッシュ",
+        "reading": "バッシュ",
+        "phones": [
+          "b",
+          "a",
+          "ɕː",
+          "ɨ̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ッ",
+        "ス"
+      ],
+      "phones": [
+        "sː",
+        "ɨ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "っす",
+        "reading": "ッス",
+        "phones": [
+          "sː",
+          "ɨ̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ッ",
+        "チ"
+      ],
+      "phones": [
+        "tɕː",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "こっち",
+        "reading": "コッチ",
+        "phones": [
+          "k",
+          "o",
+          "tɕː",
+          "i̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ッ",
+        "ツ"
+      ],
+      "phones": [
+        "tsː",
+        "ɨ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "いっつ",
+        "reading": "イッツ",
+        "phones": [
+          "i",
+          "tsː",
+          "ɨ̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ッ",
+        "ティ"
+      ],
+      "phones": [
+        "tʲː",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "メノッティ",
+        "reading": "メノッティ",
+        "phones": [
+          "m",
+          "e",
+          "n",
+          "o",
+          "tʲː",
+          "i̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ッ",
+        "プ"
+      ],
+      "phones": [
+        "pː",
+        "ɯ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "アップ",
+        "reading": "アップ",
+        "phones": [
+          "a",
+          "pː",
+          "ɯ̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ツ"
+      ],
+      "phones": [
+        "ts",
+        "ɨ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "つ",
+        "reading": "ツ",
+        "phones": [
+          "ts",
+          "ɨ̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ティ"
+      ],
+      "phones": [
+        "tʲ",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "ティフ",
+        "reading": "ティフ",
+        "phones": [
+          "tʲ",
+          "i̥",
+          "ɸ",
+          "ɯ"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ヒ"
+      ],
+      "phones": [
+        "ç",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "ひ",
+        "reading": "ヒ",
+        "phones": [
+          "ç",
+          "i̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "ピ"
+      ],
+      "phones": [
+        "pʲ",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "ぴちぴち",
+        "reading": "ピチピチ",
+        "phones": [
+          "pʲ",
+          "i̥",
+          "tɕ",
+          "i",
+          "pʲ",
+          "i̥",
+          "tɕ",
+          "i̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "フ"
+      ],
+      "phones": [
+        "ɸ",
+        "ɯ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "オフ",
+        "reading": "オフ",
+        "phones": [
+          "o",
+          "ɸ",
+          "ɯ̥"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "フィ"
+      ],
+      "phones": [
+        "ɸʲ",
+        "i̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "オフィシャル",
+        "reading": "オフィシャル",
+        "phones": [
+          "o",
+          "ɸʲ",
+          "i̥",
+          "ɕ",
+          "a",
+          "ɾ",
+          "ɯ"
+        ]
+      }
+    },
+    {
+      "kana": [
+        "プ"
+      ],
+      "phones": [
+        "p",
+        "ɯ̥"
+      ],
+      "mora_spans": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          1
+        ]
+      ],
+      "full_word_proof": {
+        "dictionary_word": "コープ",
+        "reading": "コープ",
+        "phones": [
+          "k",
+          "oː",
+          "p",
+          "ɯ̥"
+        ]
+      }
+    }
+  ]
+}

@@ -10,6 +10,11 @@ Known limitations:
 - The September 23 boundary repair changes speech-phone labels to
   `HH / LL / HL / LH`; these encode predicted mora accent, not measured F0.
   A phone with multiple pitch reversals fails `unsupported_tone_contour`.
+- When tdmelodic's accent marks are unusable but its reading matches the locked
+  reading, a speech phone whose contributing mora tones are all unknown has
+  `phone_tone` label `??`. This signals missing lexical-accent evidence, not
+  measured flat pitch. A mix of known and unknown mora tones within one phone
+  still fails projection.
 - Acoustic postprocessing adapts frame RMS, noise-floor estimation, sustained
   activity detection, and silence-edge refinement from ASRMFA--Pure. It moves
   only an explicit silence/phone edge when a nearby onset or decay is measured;

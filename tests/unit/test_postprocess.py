@@ -173,6 +173,15 @@ def test_short_phone_qc_uses_integer_microsecond_boundary(tmp_path: Path, second
     assert bool(result.report["short_phone_issues"]) is expected
 
 
+def test_short_phone_is_diagnostic_only_when_other_checks_pass(tmp_path: Path) -> None:
+    audio = tmp_path / "short_phone.wav"
+    write_wave(audio, ((0., 1.),))
+    result = postprocess_annotations(audio, 1., (phone(0., .01), phone(.01, 1.)))
+    assert result.report["short_phone_issues"]
+    assert result.report["passed"] is True
+    assert result.report["reason_code"] is None
+
+
 def test_bgm_audit_ignores_sparse_transients_in_explicit_silence() -> None:
     import numpy as np
     from japanmfa.postprocess import _bgm_suspects

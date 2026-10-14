@@ -81,3 +81,21 @@ def test_parse_accent_accepts_hiragana_marked_output_when_reading_matches() -> N
 def test_parse_accent_ignores_redundant_terminal_fall_after_low_mora() -> None:
     # Pinned tdmelodic returns ネ]ツ] for 0922jap 0090 熱.
     assert tones("ネ]ツ]", "ネ", "ツ") == ["H", "L"]
+
+
+def test_malformed_markers_with_exact_reading_keep_morae_without_guessing_tone() -> None:
+    from japanmfa.accent.parser import parse_accent_or_untoned
+
+    result = parse_accent_or_untoned("イ]シュ]タム", locked("イ", "シュ", "タ", "ム"))
+
+    assert [(m.kana, m.tone) for m in result] == [
+        ("イ", None), ("シュ", None), ("タ", None), ("ム", None),
+    ]
+
+
+@pytest.mark.parametrize("marked", ["", "イ]シュ]ダム", "イ]シュ]タム!", "イ]シュ]タ"])
+def test_untoned_fallback_rejects_missing_or_changed_reading(marked: str) -> None:
+    from japanmfa.accent.parser import parse_accent_or_untoned
+
+    with pytest.raises(StageFailure):
+        parse_accent_or_untoned(marked, locked("イ", "シュ", "タ", "ム"))

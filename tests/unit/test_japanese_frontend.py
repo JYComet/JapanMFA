@@ -97,6 +97,35 @@ def frontend() -> JapaneseFrontend:
             FakeMorpheme("行く", 6, "イク", ("動詞",)),
         ],
         "hello": [FakeMorpheme("hello", 0, "hello", ("名詞",))],
+        "ぎゅー": [
+            FakeMorpheme("ぎ", 0, "ギ", ("名詞",)),
+            FakeMorpheme("ゅ", 1, "ュ", ("名詞",)),
+            FakeMorpheme("ー", 2, "ー", ("名詞",)),
+        ],
+        "ふゅー": [
+            FakeMorpheme("ふ", 0, "フ", ("名詞",)),
+            FakeMorpheme("ゅ", 1, "ュ", ("名詞",)),
+            FakeMorpheme("ー", 2, "ー", ("名詞",)),
+        ],
+        "でゅー": [
+            FakeMorpheme("で", 0, "デ", ("名詞",)),
+            FakeMorpheme("ゅ", 1, "ュ", ("名詞",)),
+            FakeMorpheme("ー", 2, "ー", ("名詞",)),
+        ],
+        "きょに": [
+            FakeMorpheme("き", 0, "キ", ("名詞",)),
+            FakeMorpheme("ょ", 1, "ョ", ("名詞",)),
+            FakeMorpheme("に", 2, "ニ", ("助詞",)),
+        ],
+        "かゃ": [
+            FakeMorpheme("か", 0, "カ", ("名詞",)),
+            FakeMorpheme("ゃ", 1, "ャ", ("名詞",)),
+        ],
+        "き。ゃ": [
+            FakeMorpheme("き", 0, "キ", ("名詞",)),
+            FakeMorpheme("。", 1, "。", ("補助記号",)),
+            FakeMorpheme("ゃ", 2, "ャ", ("名詞",)),
+        ],
         "日本語🙂": [
             FakeMorpheme("日本語", 0, "ニホンゴ", ("名詞",)),
             FakeMorpheme("🙂", 3, "🙂", ("補助記号",)),
@@ -109,6 +138,30 @@ def frontend() -> JapaneseFrontend:
         SplitMode=SimpleNamespace(B=mode_b),
     )
     return JapaneseFrontend(sudachi_module=module)
+
+
+def test_split_small_kana_and_following_long_mark_rejoin_pronounced_token(frontend: JapaneseFrontend) -> None:
+    tokens = frontend.analyze(SourceText("ぎゅー", "ぎゅー", "txt"))
+    assert [(t.index, t.start, t.end, t.surface, t.reading) for t in tokens] == [
+        (0, 0, 3, "ぎゅー", "ギュー")]
+    tokens = frontend.analyze(SourceText("きょに", "きょに", "txt"))
+    assert [(t.index, t.start, t.end, t.surface, t.reading) for t in tokens] == [
+        (0, 0, 2, "きょ", "キョ"), (1, 2, 3, "に", "ニ")]
+
+
+@pytest.mark.parametrize("text,reading", [("ふゅー", "フュー"), ("でゅー", "デュー")])
+def test_split_foreign_yoon_rejoins_only_supported_yu_stems(
+    frontend: JapaneseFrontend, text: str, reading: str
+) -> None:
+    tokens = frontend.analyze(SourceText(text, text, "txt"))
+    assert [(t.surface, t.reading) for t in tokens] == [(text, reading)]
+
+
+@pytest.mark.parametrize("text", ["かゃ", "き。ゃ"])
+def test_split_small_kana_is_not_joined_without_valid_adjacent_i_row(frontend: JapaneseFrontend, text: str) -> None:
+    tokens = frontend.analyze(SourceText(text, text, "txt"))
+    expected = ["か", "ゃ"] if text == "かゃ" else ["き", "ゃ"]
+    assert [token.surface for token in tokens] == expected
 
 
 def assert_core_dictionary(kwargs: dict[str, object], dictionary: FakeDictionary) -> FakeDictionary:

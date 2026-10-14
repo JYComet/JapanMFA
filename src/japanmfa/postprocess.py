@@ -1163,6 +1163,10 @@ def postprocess_annotations(
             item = replace(item, interval=PhoneInterval(item.interval.start, item.interval.end, label))
         completed_rows.append(item)
     completed = tuple(completed_rows)
+    unknown_tone_phone_count = sum(item.tone_label == "??" for item in completed)
+    if unknown_tone_phone_count:
+        report["tone_source"] = "tdmelodic_predicted_with_explicit_unknown"
+        report["unknown_tone_phone_count"] = unknown_tone_phone_count
     report["final_phones"] = annotation_rows(completed)
     report["structural_issues"] = _structural_issues(duration, tuple(adjusted))
     report["tier_discontinuities"] = _collect_tier_discontinuities(tuple(adjusted), duration)
@@ -1170,8 +1174,8 @@ def postprocess_annotations(
            for issue in report["structural_issues"]):
         report.update(passed=False, reason_code="structural_invalid")
     report["short_phone_issues"] = _phone_duration_qc_issues(completed)
-    if report["short_phone_issues"]:
-        report.update(passed=False, reason_code="short_phone")
+    # MFA can assign a valid consonant less than 15 ms; retain this as review
+    # evidence, but do not reject the entire alignment solely for its length.
     report["low_energy_phone_issues"] = _low_energy_final_vowels(audio, rate, completed)
     if report["passed"] and report["low_energy_phone_issues"]:
         report.update(passed=False, reason_code="phone_in_silence")

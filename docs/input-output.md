@@ -29,7 +29,9 @@ project-owned mono PCM16/16 kHz working copy consumed by every timestamp stage.
 | `words` | MFA word intervals updated at refined silence edges, plus actual positive-duration gaps | source punctuation on matching gaps; unpunctuated internal `<sp0>` extends the preceding word, while sp1–sp3 display `……` |
 | `phones` | MFA intervals with bounded silence-edge refinement and canonical silence gaps | MFA phone labels; the same pause punctuation as words; unpunctuated internal `<sp0>` extends the preceding phone |
 | `phone_kana` | byte-for-byte same boundaries as `phones` | mora/kana contribution, possibly `オ|ー` |
-| `phone_tone` | byte-for-byte same boundaries as `phones` | exactly `HH`, `LL`, `HL`, or `LH`; source punctuation or canonical `<sp0>`–`<sp3>` for silence |
+| `phone_tone` | byte-for-byte same boundaries as `phones` | `HH`, `LL`, `HL`, or `LH` for known mora tones; `??` only when every contributing mora tone is unknown; source punctuation or canonical `<sp0>`–`<sp3>` for silence |
+
+`??` records an unavailable lexical-accent prediction; it is not an inferred pitch contour. A speech phone combining known and unknown mora tones is rejected. Outputs containing `??` declare `tone_encoding: HH_LL_HL_LH_??` and an explicit unknown-tone source/count in the JSON audit. Outputs with only known tones retain `tone_encoding: HH_LL_HL_LH`.
 
 If MFA G2P returns multiple distinct pronunciations for one locked reading,
 only candidates that map completely and uniquely to the locked morae are

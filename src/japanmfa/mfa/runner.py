@@ -62,10 +62,11 @@ class MfaRunner:
         ]
 
     def _build_align_command(
-        self, corpus_dir: Path, dictionary: Path, output_dir: Path, work_dir: Path
+        self, corpus_dir: Path, dictionary: Path, output_dir: Path, work_dir: Path,
+        *, num_jobs: int | None = None,
     ) -> list[str]:
         """Build the version-sensitive MFA 3.x alignment invocation."""
-        return [
+        command = [
             *self._command,
             "align",
             str(corpus_dir),
@@ -79,6 +80,11 @@ class MfaRunner:
             "--dither",
             format(self._dither, ".1f"),
         ]
+        if num_jobs is not None:
+            if isinstance(num_jobs, bool) or not isinstance(num_jobs, int) or num_jobs <= 0:
+                raise ValueError("num_jobs must be a positive integer")
+            command.extend(("--num_jobs", str(num_jobs)))
+        return command
 
     def validate(self, corpus_dir: Path, dictionary: Path, work_dir: Path) -> None:
         """Validate one locked MFA corpus and preserve command logs."""
@@ -141,6 +147,36 @@ class MfaRunner:
                 outputs=[str(path) for path in textgrids],
             )
         return textgrids[0]
+
+    def align_many(
+        self, corpus_dir: Path, dictionary: Path, output_dir: Path, work_dir: Path,
+        *, expected_stems: set[str], external_validate: bool = True,
+        num_jobs: int | None = None, allow_partial: bool = False,
+    ) -> dict[str, Path]:
+        """Align named inputs; trusted batches may report missing grids per item."""
+        if not expected_stems or any(not stem or Path(stem).name != stem for stem in expected_stems):
+            raise ValueError("expected_stems must contain plain non-empty names")
+        corpus_dir = Path(corpus_dir)
+        dictionary = Path(dictionary)
+        output_dir = Path(output_dir)
+        self._validate_paths(corpus_dir, work_dir, output_dir)
+        work_dir = self._create_work_dir(work_dir)
+        if external_validate:
+            self._prepare_validate_temp_dir(work_dir)
+            self._run(self._build_validate_command(corpus_dir, dictionary, work_dir), work_dir, "validate")
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise _failure("output_directory_failed", f"could not create MFA output directory: {output_dir}",
+                           output_dir=str(output_dir), error=str(exc)) from exc
+        self._run(self._build_align_command(corpus_dir, dictionary, output_dir, work_dir,
+                                            num_jobs=num_jobs), work_dir, "align")
+        grids = {path.stem: path for path in output_dir.rglob("*")
+                 if path.is_file() and path.suffix.casefold() == ".textgrid"}
+        if set(grids) - expected_stems or (not allow_partial and set(grids) != expected_stems):
+            raise _failure("output_coverage_mismatch", "MFA output grids do not match corpus inputs",
+                           expected=sorted(expected_stems), actual=sorted(grids))
+        return grids
 
     @staticmethod
     def _validate_owned_root(owned_root: Path) -> Path:

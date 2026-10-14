@@ -214,6 +214,27 @@ def expand_timed_segments_with_audio(
         # validated endpoint and must not extend acoustic timing support.
         return None
 
+    def weak_tail_at_anchor(anchor: float, limit: int) -> float | None:
+        """Keep a connected word tail that is below the local speech floor.
+
+        The old CTC word-end pass searches for the first sustained energy
+        fall even when the final phonation is weak. Require activity on both
+        sides of the original anchor, then stop at the first three quiet
+        frames; a later detached sound cannot supply the endpoint.
+        """
+        index = min(count, max(0, round(anchor / frame_seconds)))
+        if (index < 2 or index + 1 >= min(count, limit)
+                or not np.all(rms[index - 2:index] > decay_threshold)
+                or rms[index] <= decay_threshold):
+            return None
+        cap = min(count, limit, index + round(.35 / frame_seconds))
+        stop = min(count, limit, cap + 3)
+        for candidate in range(index + 1, stop - 2):
+            if (candidate <= cap
+                    and np.all(rms[candidate:candidate + 3] <= decay_threshold)):
+                return round(candidate * frame_seconds, 6)
+        return None
+
     expanded: list[TimedSegment] = []
     for index, segment in enumerate(segments):
         anchor_start = segment.anchor_start if segment.anchor_start is not None else segment.start
@@ -233,6 +254,8 @@ def expand_timed_segments_with_audio(
             strong_end = min(end_support, round(end_limit * frame_seconds, 6))
             decay_end = connected_decay_end(strong_end, end_limit)
             end_support = decay_end if decay_end is not None else strong_end
+        else:
+            end_support = weak_tail_at_anchor(anchor_end, end_limit)
         start = (
             min(segment.start, quiet_padding(start_support, threshold, -1, .1))
             if start_support is not None else segment.start

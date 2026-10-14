@@ -49,6 +49,40 @@ def test_writes_validated_five_tier_textgrid_with_shared_phone_boundaries(
     assert boundaries[0] == boundaries[1] == boundaries[2]
 
 
+def test_unknown_tone_round_trips_without_changing_phone_or_kana(tmp_path: Path) -> None:
+    path = tmp_path / "unknown.TextGrid"
+    mora = Mora(0, 0, "ア", None)
+    annotation = PhoneAnnotation(PhoneInterval(0.0, 1.0, "a"), 0, (mora,), "ア", "??", False)
+
+    write_five_tier_textgrid(path, 1.0, "あ", "ア", (annotation,))
+    validate_five_tier_textgrid(path, 1.0, frozenset())
+
+    grid = praat_textgrid.openTextgrid(str(path), includeEmptyIntervals=True)
+    assert [row.label for row in grid.getTier("phones").entries] == ["a"]
+    assert [row.label for row in grid.getTier("phone_kana").entries] == ["ア"]
+    assert [row.label for row in grid.getTier("phone_tone").entries] == ["??"]
+
+
+def test_unknown_tone_label_requires_untoned_morae(tmp_path: Path) -> None:
+    path = tmp_path / "false-unknown.TextGrid"
+    annotation = PhoneAnnotation(
+        PhoneInterval(0.0, 1.0, "a"), 0, (Mora(0, 0, "ア", "H"),), "ア", "??", False,
+    )
+    with pytest.raises(ValueError, match="unknown tone"):
+        write_five_tier_textgrid(path, 1.0, "あ", "ア", (annotation,))
+    assert not path.exists()
+
+
+def test_untoned_morae_cannot_be_published_as_a_guessed_tone(tmp_path: Path) -> None:
+    path = tmp_path / "false-known.TextGrid"
+    annotation = PhoneAnnotation(
+        PhoneInterval(0.0, 1.0, "a"), 0, (Mora(0, 0, "ア", None),), "ア", "HH", False,
+    )
+    with pytest.raises(ValueError, match="unknown tone"):
+        write_five_tier_textgrid(path, 1.0, "あ", "ア", (annotation,))
+    assert not path.exists()
+
+
 def test_textgrid_round_trips_quotes_with_praat_doubled_quote_syntax(tmp_path: Path) -> None:
     path = tmp_path / "quoted.TextGrid"
     annotation = PhoneAnnotation(

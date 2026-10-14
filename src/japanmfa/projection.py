@@ -7,6 +7,7 @@ import unicodedata
 
 from japanmfa.domain import Mora, PhoneAnnotation, PhoneInterval, Pronunciation, Token
 from japanmfa.errors import StageFailure
+from japanmfa.mfa.dictionary_candidates import exact_missing_geminate_candidate
 from japanmfa.mfa.lexicon import LockedLexicon
 from japanmfa.mfa.phone_map import PhoneMap
 from japanmfa.mfa.textgrid import MfaAlignment, MfaPhone
@@ -28,10 +29,18 @@ def _canonical_kana(value: str) -> str:
 
 def labels_for_phone(morae: tuple[Mora, ...]) -> tuple[str, str]:
     kana = "|".join(mora.kana for mora in morae)
-    if not kana or any(mora.tone not in {"H", "L"} for mora in morae):
+    if not kana:
         raise _failure(
             "unlabeled_phone",
-            "every non-silence phone must map to toned morae",
+            "every non-silence phone must map to morae",
+            morae=[mora.kana for mora in morae],
+        )
+    if all(mora.tone is None for mora in morae):
+        return kana, "??"
+    if any(mora.tone not in {"H", "L"} for mora in morae):
+        raise _failure(
+            "unlabeled_phone",
+            "a phone cannot mix known and unknown mora tones",
             morae=[mora.kana for mora in morae],
         )
     tones = tuple(mora.tone for mora in morae)
@@ -131,6 +140,18 @@ def filter_mappable_pronunciations(
             except StageFailure:
                 continue
             compatible.append(candidate)
+        if (not compatible and phone_map.model_family == "japanese_mfa_v3"
+                and pronunciation.reading == token.reading):
+            candidate = exact_missing_geminate_candidate(
+                token.reading, (pronunciation.phones, *pronunciation.alternates)
+            )
+            if candidate is not None:
+                try:
+                    _match_morae_to_phones(token_morae[token.index], candidate, phone_map)
+                except StageFailure:
+                    pass
+                else:
+                    compatible.append(candidate)
         if not compatible:
             raise _failure(
                 "no_mappable_pronunciation",
